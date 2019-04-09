@@ -95,7 +95,7 @@ func NewEventPublisher(routingKey string, connection *amqp.Connection) chan stri
 
 	go func() {
 		for msg := range p {
-			_ := ch.Publish(eventExchangeName,
+			ch.Publish(eventExchangeName,
 				routingKey,
 				false,
 				false,
