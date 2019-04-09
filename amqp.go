@@ -1,9 +1,9 @@
 package go_amqp
 
 import (
-"fmt"
-"github.com/streadway/amqp"
-"log"
+	"fmt"
+	"github.com/streadway/amqp"
+	"log"
 )
 
 type Config struct {
@@ -84,4 +84,28 @@ func NewListener(svcName, routingKey string, onMessage func(delivery amqp.Delive
 		}
 	}()
 
+}
+
+func NewEventPublisher(routingKey string, connection *amqp.Connection) chan string {
+	p := make(chan string)
+	ch, err := connection.Channel()
+	if err != nil {
+		log.Fatalln("failed to open channel", err)
+	}
+
+	go func() {
+		for msg := range p {
+			_ := ch.Publish(eventExchangeName,
+				routingKey,
+				false,
+				false,
+				amqp.Publishing{
+					Body:        []byte(msg),
+					ContentType: "application/json",
+				},
+			)
+		}
+
+	}()
+	return p
 }
