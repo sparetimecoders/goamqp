@@ -1,0 +1,43 @@
+variables:
+  GOCACHE: "${CI_PROJECT_DIR}/_go/cache"
+
+before_script:
+  - mkdir -p ${CI_PROJECT_DIR}/_go/{pkg,bin,cache}
+  - rm -rf /go/pkg
+  - ln -s ${CI_PROJECT_DIR}/_go/pkg /go/pkg
+  - ln -s ${CI_PROJECT_DIR}/_go/bin /go/bin
+
+cache:
+  key: "$CI_COMMIT_REF_NAME"
+  paths:
+    - _go
+  untracked: true
+
+stages:
+  - deps
+  - test
+  - build
+
+deps:
+  stage: deps
+  image: golang:1.12
+  script:
+    - go get -mod=readonly
+
+test:
+  stage: test
+  dependencies:
+    - deps
+  image: golang:1.12
+  script:
+    - find . -name "rice-box.go" -delete
+    - go fmt $(go list ./...)
+    - go vet $(go list ./...)
+    - CGO_ENABLED=1 go test -mod=readonly -race -coverprofile=.testCoverage.txt -covermode=atomic -coverpkg=$(go list ./... | tr '\n' , | sed 's/,$//') ./...
+    - go tool cover -html=.testCoverage.txt -o coverage.html
+    - go tool cover -func=.testCoverage.txt
+  artifacts:
+    paths:
+      - coverage.html
+
+
