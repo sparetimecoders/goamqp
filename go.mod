@@ -1,4 +1,4 @@
-module gitlab.com/sparetimecoders/go-amqp
+module gitlab.com/sparetimecoders/go_amqp
 
 go 1.12
 
