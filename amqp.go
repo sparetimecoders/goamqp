@@ -2,6 +2,7 @@ package go_amqp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/streadway/amqp"
 	"log"
@@ -19,20 +20,37 @@ type Config struct {
 	VHost    string `env:"RABBITMQ_VHOST" envDefault:""`
 }
 
-// A new MessageHandler will created and populated from the amqp.Delivery.Body when a new message has been received on the queue
-// Handle() is then called and if it returns true the message will be Acknowledged, otherwise it will be re-queued again.
-type MessageHandler interface {
-	Handle() bool
+// IncomingMessageHandler is a marker interface for implementations that want to register as message handlers.
+// Implementations MUST implement a Process method with a single argument of the type returned by the Type() method.
+// Example:
+//
+//  type IncomingMessageHandler struct {}
+//
+//  func (IncomingMessageHandler) Type() interface{} {
+//	  return IncomingMessage{}
+//  }
+//
+//  func (i IncomingMessageHandler) Process(m IncomingMessage) bool {
+//	  return true
+//  }
+//
+//  NewEventStreamListener("service", "key", IncomingMessageHandler{})
+//
+// When a message is received from RabbitMQ, a new instance of the type returned from Type() will be created and
+// populated fromm the Json in the message.
+// Process() is then called and if it returns true the message will be Acknowledged, otherwise it will be re-queued again.
+type IncomingMessageHandler interface {
+	Type() interface{}
 }
 
 // Connection is used to setup new listeners and publishers.
 type Connection interface {
 	// Create a new Event Stream Listener
 	// The passed MessageHandler is used to transform the incoming message from JSON and then process it
-	NewEventStreamListener(svcName, routingKey string, handler MessageHandler)
+	NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler)
 	// Create a new Service Listener (listening to <svcName>.request.queue)
 	// The passed MessageHandler is used to transform the incoming message from JSON and then process it
-	NewServiceListener(svcName, routingKey string, handler MessageHandler)
+	NewServiceListener(svcName, routingKey string, handler IncomingMessageHandler)
 	// Create a new Event Stream Publisher
 	// The returned Channel is used to put JSON "structs" onto the EventStream
 	NewEventStreamPublisher(routingKey string) chan interface{}
@@ -58,14 +76,24 @@ func New(config Config) (Connection, error) {
 	return connectToAmqp(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
 }
 
-func (c connection) NewEventStreamListener(svcName, routingKey string, handler MessageHandler) {
+// Create a new Event Stream Listener
+// The passed IncomingMessageHandler will be called with the message after deserialization
+func (c connection) NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) {
+	invoker, err := checkHandler(handler)
+	if err != nil {
+		log.Fatal(err)
+	}
 	msgs := c.eventListener(svcName, routingKey)
-	go listener(msgs, handler)
+	go listener(msgs, invoker, handler)
 }
 
-func (c connection) NewServiceListener(svcName, routingKey string, handler MessageHandler) {
+func (c connection) NewServiceListener(svcName, routingKey string, handler IncomingMessageHandler) {
+	invoker, err := checkHandler(handler)
+	if err != nil {
+		log.Fatal(err)
+	}
 	msgs := c.serviceListener(svcName, routingKey)
-	go listener(msgs, handler)
+	go listener(msgs, invoker, handler)
 }
 
 func (c connection) NewEventStreamPublisher(routingKey string) chan interface{} {
@@ -105,9 +133,13 @@ func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName str
 	}
 }
 
-func listener(msgs <-chan amqp.Delivery, handler MessageHandler) {
+func listener(msgs <-chan amqp.Delivery, invoker reflect.Value, handler IncomingMessageHandler) {
 	for d := range msgs {
-		if parseMessage(d, handler).Handle() {
+		message := parseMessage(d, handler)
+
+		args := []reflect.Value{reflect.ValueOf(handler), reflect.ValueOf(message).Elem()}
+		call := invoker.Call(args)[0]
+		if call.Bool() {
 			log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
 			_ = d.Ack(false)
 		} else {
@@ -115,6 +147,7 @@ func listener(msgs <-chan amqp.Delivery, handler MessageHandler) {
 			_ = d.Nack(false, true)
 		}
 	}
+
 }
 
 func connectToAmqp(amqpUrl string) (Connection, error) {
@@ -126,6 +159,7 @@ func connectToAmqp(amqpUrl string) (Connection, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &connection{
 		connection: conn,
 		channel:    ch,
@@ -160,13 +194,13 @@ func (c connection) setupServiceExchange(service string) {
 	_ = c.serviceExchange(service)
 }
 
-func parseMessage(delivery amqp.Delivery, handler MessageHandler) MessageHandler {
+func parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) interface{} {
 	body := delivery.Body
-	res := reflect.New(reflect.TypeOf(handler)).Elem().Addr().Interface()
+	res := reflect.New(reflect.TypeOf(handler.Type())).Elem().Addr().Interface()
 	if err := json.Unmarshal(body, &res); err != nil {
 		log.Fatalf("failed to deserialize json [%s]to struct, %v", string(body), err)
 	}
-	return res.(MessageHandler)
+	return res
 }
 
 var eventExchangeName = "events.topic.exchange"
@@ -247,4 +281,28 @@ func (c connection) consume(queue string) (<-chan amqp.Delivery, error) {
 		false,
 		nil,
 	)
+}
+
+
+func checkHandler(handler IncomingMessageHandler) (reflect.Value, error) {
+	m, ok := reflect.TypeOf(handler).MethodByName("Process")
+	errValue := reflect.Value{}
+	if !ok {
+		return errValue, errors.New(fmt.Sprintf("missing method Process on handler, %s", reflect.TypeOf(handler).Elem()))
+	}
+
+	methodType := m.Type
+	if methodType.NumIn() != 2 {
+		return errValue, errors.New(fmt.Sprintf("incorrect number of arguments, expected 1 but was %d", methodType.NumIn()-1))
+	}
+	if methodType.In(1) != reflect.TypeOf(handler.Type()) {
+		return errValue, errors.New(fmt.Sprintf("incorrect in arguments. Expected Process(%s), actual Process(%s)", reflect.TypeOf(handler.Type()), methodType.In(1)))
+	}
+	if methodType.NumOut() != 1 {
+		return errValue, errors.New(fmt.Sprintf("incorrect number of return values. Expected 1, actual %d", methodType.NumOut()))
+	}
+	if methodType.Out(0).Kind() != reflect.Bool {
+		return errValue, errors.New(fmt.Sprintf("incorrect return type for Process(%s). Expected bool, actual %v", reflect.TypeOf(handler.Type()), methodType.Out(0)))
+	}
+	return m.Func, nil
 }

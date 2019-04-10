@@ -34,7 +34,7 @@ func main() {
 		log.Fatalln("failed to connect", err)
 	}
 
-	connection.NewEventStreamListener("test-service", "testkey", IncomingMessage{})
+	//connection.NewEventStreamListener("test-service", "testkey", IncomingMessage{})
 
 	p := connection.NewEventStreamPublisher("testkey")
 
@@ -48,4 +48,17 @@ func main() {
 			p <- IncomingMessage{"OK"}
 		}
 	}
+}
+
+type IncomingMessageHandler struct {
+	ctx string
+}
+
+func (IncomingMessageHandler) Type() interface{} {
+	return IncomingMessage{}
+}
+
+func (i IncomingMessageHandler) Process(m IncomingMessage) bool {
+	fmt.Printf("Called process with %v and ctx %v\n", m, i.ctx)
+	return true
 }
