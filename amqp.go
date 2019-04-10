@@ -27,8 +27,18 @@ type MessageHandler interface {
 
 // Connection is used to setup new listeners and publishers.
 type Connection interface {
+	// Create a new Event Stream Listener
+	// The passed MessageHandler is used to transform the incoming message from JSON and then process it
 	NewEventStreamListener(svcName, routingKey string, handler MessageHandler)
+	// Create a new Service Listener (listening to <svcName>.request.queue)
+	// The passed MessageHandler is used to transform the incoming message from JSON and then process it
+	NewServiceListener(svcName, routingKey string, handler MessageHandler)
+	// Create a new Event Stream Publisher
+	// The returned Channel is used to put JSON "structs" onto the EventStream
 	NewEventStreamPublisher(routingKey string) chan interface{}
+	// Create a new Service publisher
+	// The returned Channel is used to put JSON "structs" onto the EventStream
+	NewServicePublisher(svcName, routingKey string) chan interface{}
 }
 
 // Internal state
@@ -48,54 +58,63 @@ func New(config Config) (Connection, error) {
 	return connectToAmqp(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
 }
 
-// Create a new Event Stream Listener
-// The passed MessageHandler is used to transform the incoming message from JSON and then process it
 func (c connection) NewEventStreamListener(svcName, routingKey string, handler MessageHandler) {
-	msgs := listener(svcName, routingKey, c.channel)
-
-	go func() {
-		for d := range msgs {
-			if parseMessage(d, handler).Handle() {
-				log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
-				_ = d.Ack(false)
-			} else {
-				log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
-				_ = d.Nack(false, true)
-			}
-		}
-	}()
+	msgs := c.eventListener(svcName, routingKey)
+	go listener(msgs, handler)
 }
 
-// Create a new Event Stream Publisher
-// The returned Channel is used to put JSON "structs" onto the EventStream
+func (c connection) NewServiceListener(svcName, routingKey string, handler MessageHandler) {
+	msgs := c.serviceListener(svcName, routingKey)
+	go listener(msgs, handler)
+}
+
 func (c connection) NewEventStreamPublisher(routingKey string) chan interface{} {
-	setupEventExchange(c.channel)
+	c.setupEventExchange()
 	p := make(chan interface{})
-
-	go func() {
-		for msg := range p {
-			log.Println("publishing message to event stream")
-			jsonBytes, err := json.Marshal(msg)
-			if err != nil {
-				log.Fatal("failed to transform json", err)
-			}
-			err = c.channel.Publish(eventExchangeName,
-				routingKey,
-				false,
-				false,
-				amqp.Publishing{
-					Body:        jsonBytes,
-					ContentType: "application/json",
-				},
-			)
-			if err != nil {
-				log.Fatal("failed to publish event", err)
-			}
-			log.Println("published message to event stream", string(jsonBytes))
-		}
-
-	}()
+	go c.publisher(p, routingKey, eventExchangeName)
 	return p
+}
+
+func (c connection) NewServicePublisher(svcName, routingKey string) chan interface{} {
+	c.setupServiceExchange(svcName)
+	p := make(chan interface{})
+	go c.publisher(p, routingKey, serviceExchangeName(svcName))
+	return p
+}
+
+func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName string) {
+	for msg := range p {
+		log.Println("publishing message to event stream")
+		jsonBytes, err := json.Marshal(msg)
+		if err != nil {
+			log.Fatal("failed to transform json", err)
+		}
+		err = c.channel.Publish(exchangeName,
+			routingKey,
+			false,
+			false,
+			amqp.Publishing{
+				Body:        jsonBytes,
+				ContentType: "application/json",
+			},
+		)
+		if err != nil {
+			log.Fatal("failed to publish event", err)
+		}
+		log.Println("published message to event stream", string(jsonBytes))
+	}
+}
+
+func listener(msgs <-chan amqp.Delivery, handler MessageHandler) {
+	for d := range msgs {
+		if parseMessage(d, handler).Handle() {
+			log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
+			_ = d.Ack(false)
+		} else {
+			log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
+			_ = d.Nack(false, true)
+		}
+	}
 }
 
 func connectToAmqp(amqpUrl string) (Connection, error) {
@@ -113,17 +132,32 @@ func connectToAmqp(amqpUrl string) (Connection, error) {
 	}, nil
 }
 
-func listener(service string, routingKey string, ch *amqp.Channel) <-chan amqp.Delivery {
+func (c connection) eventListener(service, routingKey string) <-chan amqp.Delivery {
 	// TODO Errorhandling
-	setupEventExchange(ch)
-	_, _ = declareEventQueue(service, ch)
-	_ = bindToEventTopic(service, routingKey, ch)
-	delivery, _ := consume(service, ch)
+	c.setupEventExchange()
+	_, _ = c.declareEventQueue(service)
+	_ = c.bindToEventTopic(service, routingKey)
+	delivery, _ := c.consumeEventQueue(service)
 	return delivery
 }
-func setupEventExchange(ch *amqp.Channel) {
+
+func (c connection) serviceListener(service, routingKey string) <-chan amqp.Delivery {
 	// TODO Errorhandling
-	_ = eventsExchange(ch)
+	c.setupServiceExchange(service)
+	_, _ = c.declareServiceQueue(service)
+	_ = c.bindToService(service, routingKey)
+	delivery, _ := c.consumeRequestQueue(service)
+	return delivery
+}
+
+func (c connection) setupEventExchange() {
+	// TODO Errorhandling
+	_ = c.eventsExchange()
+}
+
+func (c connection) setupServiceExchange(service string) {
+	// TODO Errorhandling
+	_ = c.serviceExchange(service)
 }
 
 func parseMessage(delivery amqp.Delivery, handler MessageHandler) MessageHandler {
@@ -137,8 +171,21 @@ func parseMessage(delivery amqp.Delivery, handler MessageHandler) MessageHandler
 
 var eventExchangeName = "events.topic.exchange"
 
-func eventsExchange(ch *amqp.Channel) error {
-	return ch.ExchangeDeclare(eventExchangeName,
+func (c connection) eventsExchange() error {
+	return c.exchangeDeclare(eventExchangeName)
+}
+
+func (c connection) serviceExchange(svcName string) error {
+	return c.exchangeDeclare(serviceExchangeName(svcName))
+}
+
+func serviceExchangeName(svcName string) string {
+	return fmt.Sprintf("%s.topic.exchange", svcName)
+}
+
+func (c connection) exchangeDeclare(name string) error {
+	return c.channel.ExchangeDeclare(
+		name,
 		"topic",
 		true,
 		false,
@@ -152,8 +199,20 @@ func serviceEventQueueName(service string) string {
 	return fmt.Sprintf("%s.queue.%s", eventExchangeName, service)
 }
 
-func declareEventQueue(service string, ch *amqp.Channel) (amqp.Queue, error) {
-	return ch.QueueDeclare(serviceEventQueueName(service),
+func serviceRequestQueueName(service string) string {
+	return fmt.Sprintf("%s.request.queue", service)
+}
+
+func (c connection) declareEventQueue(service string) (amqp.Queue, error) {
+	return c.queueDeclare(serviceEventQueueName(service))
+}
+
+func (c connection) declareServiceQueue(service string) (amqp.Queue, error) {
+	return c.queueDeclare(serviceRequestQueueName(service))
+}
+
+func (c connection) queueDeclare(name string) (amqp.Queue, error) {
+	return c.channel.QueueDeclare(name,
 		true,
 		false,
 		false,
@@ -162,13 +221,25 @@ func declareEventQueue(service string, ch *amqp.Channel) (amqp.Queue, error) {
 	)
 }
 
-func bindToEventTopic(service, routingKey string, ch *amqp.Channel) error {
-	return ch.QueueBind(serviceEventQueueName(service), routingKey, eventExchangeName, false, nil)
+func (c connection) bindToEventTopic(service, routingKey string) error {
+	return c.channel.QueueBind(serviceEventQueueName(service), routingKey, eventExchangeName, false, nil)
 }
 
-func consume(service string, ch *amqp.Channel) (<-chan amqp.Delivery, error) {
-	return ch.Consume(
-		serviceEventQueueName(service),
+func (c connection) bindToService(service, routingKey string) error {
+	return c.channel.QueueBind(serviceRequestQueueName(service), routingKey, "", false, nil)
+}
+
+func (c connection) consumeEventQueue(service string) (<-chan amqp.Delivery, error) {
+	return c.consume(serviceEventQueueName(service))
+}
+
+func (c connection) consumeRequestQueue(service string) (<-chan amqp.Delivery, error) {
+	return c.consume(serviceRequestQueueName(service))
+}
+
+func (c connection) consume(queue string) (<-chan amqp.Delivery, error) {
+	return c.channel.Consume(
+		queue,
 		"",
 		false,
 		false,
