@@ -25,29 +25,49 @@ type MessageHandler interface {
 	Handle() bool
 }
 
-// Connect to a RabbitMQ instance
-func Connect(config Config) (*amqp.Connection, error) {
-	return amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
+// Connection is used to setup new listeners and publishers.
+type Connection interface {
+	NewEventStreamListener(svcName, routingKey string, handler MessageHandler)
+	NewEventStreamPublisher(routingKey string) chan interface{}
+}
 
+// Internal state
+type connection struct {
+	connection *amqp.Connection
+	channel *amqp.Channel
+}
+
+var _ Connection = &connection{}
+
+// Connect to a RabbitMQ instance
+func New(config Config) (Connection, error) {
+	conn, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
+	if err != nil {
+		return nil, err
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, err
+	}
+	return &connection{
+		connection: conn,
+		channel: ch,
+	}, nil
 }
 
 // Create a new Event Stream Listener
-// The passed MessageHandler is used to transform the incoming message from  JSON and then process it
-func NewEventStreamListener(svcName, routingKey string, handler MessageHandler, connection *amqp.Connection) {
-	ch, err := connection.Channel()
-	if err != nil {
-		log.Fatalln("failed to open channel", err)
-	}
-	msgs := listener(svcName, routingKey, ch)
+// The passed MessageHandler is used to transform the incoming message from JSON and then process it
+func (c connection) NewEventStreamListener(svcName, routingKey string, handler MessageHandler) {
+	msgs := listener(svcName, routingKey, c.channel)
 
 	go func() {
 		for d := range msgs {
 			if parseMessage(d, handler).Handle() {
 				log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
-				d.Ack(false)
+				_ = d.Ack(false)
 			} else {
 				log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
-				d.Nack(false, true)
+				_ = d.Nack(false, true)
 			}
 		}
 	}()
@@ -55,17 +75,13 @@ func NewEventStreamListener(svcName, routingKey string, handler MessageHandler, 
 
 // Create a new Event Stream Publisher
 // The returned Channel is used to put JSON "structs" onto the EventStream
-func NewEventStreamPublisher(routingKey string, connection *amqp.Connection) chan interface{} {
+func (c connection) NewEventStreamPublisher(routingKey string) chan interface{} {
 	p := make(chan interface{})
-	ch, err := connection.Channel()
-	if err != nil {
-		log.Fatalln("failed to open channel", err)
-	}
 
 	go func() {
 		for msg := range p {
 			jsonStr, _ := json.Marshal(msg)
-			ch.Publish(eventExchangeName,
+			_ = c.channel.Publish(eventExchangeName,
 				routingKey,
 				false,
 				false,
@@ -82,9 +98,9 @@ func NewEventStreamPublisher(routingKey string, connection *amqp.Connection) cha
 
 func listener(service string, routingKey string, ch *amqp.Channel) <-chan amqp.Delivery {
 	// TODO Errorhandling
-	eventsExchange(ch)
-	declareEventQueue(service, ch)
-	bindToEventTopic(service, routingKey, ch)
+	_ = eventsExchange(ch)
+	_, _ = declareEventQueue(service, ch)
+	_ = bindToEventTopic(service, routingKey, ch)
 	delivery, _ := consume(service, ch)
 	return delivery
 }
