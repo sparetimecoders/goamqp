@@ -69,20 +69,29 @@ func (c connection) NewEventStreamListener(svcName, routingKey string, handler M
 // Create a new Event Stream Publisher
 // The returned Channel is used to put JSON "structs" onto the EventStream
 func (c connection) NewEventStreamPublisher(routingKey string) chan interface{} {
+	setupEventExchange(c.channel)
 	p := make(chan interface{})
 
 	go func() {
 		for msg := range p {
-			jsonStr, _ := json.Marshal(msg)
-			_ = c.channel.Publish(eventExchangeName,
+			log.Println("publishing message to event stream")
+			jsonBytes, err := json.Marshal(msg)
+			if err != nil {
+				log.Fatal("failed to transform json", err)
+			}
+			err = c.channel.Publish(eventExchangeName,
 				routingKey,
 				false,
 				false,
 				amqp.Publishing{
-					Body:        jsonStr,
+					Body:        jsonBytes,
 					ContentType: "application/json",
 				},
 			)
+			if err != nil {
+				log.Fatal("failed to publish event", err)
+			}
+			log.Println("published message to event stream", string(jsonBytes))
 		}
 
 	}()
@@ -106,11 +115,15 @@ func connectToAmqp(amqpUrl string) (Connection, error) {
 
 func listener(service string, routingKey string, ch *amqp.Channel) <-chan amqp.Delivery {
 	// TODO Errorhandling
-	_ = eventsExchange(ch)
+	setupEventExchange(ch)
 	_, _ = declareEventQueue(service, ch)
 	_ = bindToEventTopic(service, routingKey, ch)
 	delivery, _ := consume(service, ch)
 	return delivery
+}
+func setupEventExchange(ch *amqp.Channel) {
+	// TODO Errorhandling
+	_ = eventsExchange(ch)
 }
 
 func parseMessage(delivery amqp.Delivery, handler MessageHandler) MessageHandler {
