@@ -34,25 +34,18 @@ type Connection interface {
 // Internal state
 type connection struct {
 	connection *amqp.Connection
-	channel *amqp.Channel
+	channel    *amqp.Channel
 }
 
 var _ Connection = &connection{}
 
+func NewFromUrl(amqpUrl string) (Connection, error) {
+	return connectToAmqp(amqpUrl)
+}
+
 // Connect to a RabbitMQ instance
 func New(config Config) (Connection, error) {
-	conn, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
-	if err != nil {
-		return nil, err
-	}
-	ch, err := conn.Channel()
-	if err != nil {
-		return nil, err
-	}
-	return &connection{
-		connection: conn,
-		channel: ch,
-	}, nil
+	return connectToAmqp(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
 }
 
 // Create a new Event Stream Listener
@@ -94,6 +87,21 @@ func (c connection) NewEventStreamPublisher(routingKey string) chan interface{} 
 
 	}()
 	return p
+}
+
+func connectToAmqp(amqpUrl string) (Connection, error) {
+	conn, err := amqp.Dial(amqpUrl)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, err
+	}
+	return &connection{
+		connection: conn,
+		channel:    ch,
+	}, nil
 }
 
 func listener(service string, routingKey string, ch *amqp.Channel) <-chan amqp.Delivery {
