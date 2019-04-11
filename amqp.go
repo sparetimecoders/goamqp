@@ -71,12 +71,24 @@ var eventsExchange = serviceExchangeName("events")
 
 // Connect to a RabbitMQ instance
 func NewFromUrl(amqpUrl string) (Connection, error) {
-	return connectToAmqp(amqpUrl)
+	conn, err := amqp.Dial(amqpUrl)
+	if err != nil {
+		return nil, err
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, err
+	}
+
+	return &connection{
+		connection: conn,
+		channel:    ch,
+	}, nil
 }
 
 // Connect to a RabbitMQ instance
 func New(config Config) (Connection, error) {
-	return connectToAmqp(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
+	return NewFromUrl(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
 }
 
 func (c connection) NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) error {
@@ -138,7 +150,7 @@ func (c connection) NewServicePublisher(svcName, routingKey string) (chan interf
 
 func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName string) {
 	for msg := range p {
-		log.Println("publishing message to event stream")
+		log.Printf("publishing message to %s\n", exchangeName)
 		jsonBytes, err := json.Marshal(msg)
 		failOnError(err, "failed to transform json")
 
@@ -152,7 +164,7 @@ func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName str
 			},
 		)
 		failOnError(err, "failed to publish event")
-		log.Println("published message to event stream", string(jsonBytes))
+		log.Printf("published message to %s: %s", exchangeName, string(jsonBytes))
 	}
 }
 
@@ -174,22 +186,6 @@ func listener(msgs <-chan amqp.Delivery, invoker reflect.Value, handler Incoming
 		}
 	}
 
-}
-
-func connectToAmqp(amqpUrl string) (Connection, error) {
-	conn, err := amqp.Dial(amqpUrl)
-	if err != nil {
-		return nil, err
-	}
-	ch, err := conn.Channel()
-	if err != nil {
-		return nil, err
-	}
-
-	return &connection{
-		connection: conn,
-		channel:    ch,
-	}, nil
 }
 
 func (c connection) eventListener(service, routingKey string) (<-chan amqp.Delivery, error) {
@@ -290,7 +286,7 @@ func (c connection) bindToEventTopic(service, routingKey string) error {
 }
 
 func (c connection) bindToService(service, routingKey string) error {
-	return c.channel.QueueBind(serviceRequestQueueName(service), routingKey, "", false, nil)
+	return c.channel.QueueBind(serviceRequestQueueName(service), routingKey, serviceExchangeName(service), false, nil)
 }
 
 func (c connection) consumeEventQueue(service string) (<-chan amqp.Delivery, error) {
