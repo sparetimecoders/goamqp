@@ -6,10 +6,11 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"testing"
 	"time"
 )
 
-func (p IncomingMessage) Handle() bool {
+func (p IncomingMessage) Process() bool {
 	fmt.Println(p.Url)
 	if strings.Contains(p.Url, "OK") {
 		return true
@@ -21,7 +22,8 @@ type IncomingMessage struct {
 	Url string
 }
 
-func main() {
+func x_TestName(t *testing.T) {
+
 	config := go_amqp.Config{
 		Host:     "localhost",
 		Port:     5672,
@@ -34,14 +36,22 @@ func main() {
 		log.Fatalln("failed to connect", err)
 	}
 
-	//connection.NewEventStreamListener("test-service", "testkey", IncomingMessage{})
-
-	p := connection.NewEventStreamPublisher("testkey")
+	err = connection.NewEventStreamListener("test-service", "testkey", IncomingMessageHandler{})
+	if err != nil {
+		log.Fatalln("failed to create listener", err)
+	}
+	p, err := connection.NewEventStreamPublisher("testkey")
+	fmt.Println(err)
+	if err != nil {
+		log.Fatalln("failed to create publisher", err)
+	}
 
 	r := rand.New(rand.NewSource(99))
 	for {
 		fmt.Println("Sleep")
 		time.Sleep(2 * time.Second)
+		fmt.Println("Sending")
+
 		if r.Int()%2 == 0 {
 			p <- IncomingMessage{"FAILED"}
 		} else {

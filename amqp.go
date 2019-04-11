@@ -22,6 +22,7 @@ type Config struct {
 
 // IncomingMessageHandler is a marker interface for implementations that want to register as message handlers.
 // Implementations MUST implement a Process method with a single argument of the type returned by the Type() method.
+// The conditions will be checked during 'registration' of the handler.
 // Example:
 //
 //  type IncomingMessageHandler struct {}
@@ -46,17 +47,17 @@ type IncomingMessageHandler interface {
 // Connection is used to setup new listeners and publishers.
 type Connection interface {
 	// Create a new Event Stream Listener
-	// The passed MessageHandler is used to transform the incoming message from JSON and then process it
-	NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler)
+	// The passed IncomingMessageHandler is used to process received messages
+	NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) error
 	// Create a new Service Listener (listening to <svcName>.request.queue)
-	// The passed MessageHandler is used to transform the incoming message from JSON and then process it
-	NewServiceListener(svcName, routingKey string, handler IncomingMessageHandler)
+	// The passed IncomingMessageHandler is used to process received messages
+	NewServiceListener(svcName, routingKey string, handler IncomingMessageHandler) error
 	// Create a new Event Stream Publisher
 	// The returned Channel is used to put JSON "structs" onto the EventStream
-	NewEventStreamPublisher(routingKey string) chan interface{}
+	NewEventStreamPublisher(routingKey string) (chan interface{}, error)
 	// Create a new Service publisher
 	// The returned Channel is used to put JSON "structs" onto the EventStream
-	NewServicePublisher(svcName, routingKey string) chan interface{}
+	NewServicePublisher(svcName, routingKey string) (chan interface{}, error)
 }
 
 // Internal state
@@ -66,7 +67,9 @@ type connection struct {
 }
 
 var _ Connection = &connection{}
+var eventsExchange = serviceExchangeName("events")
 
+// Connect to a RabbitMQ instance
 func NewFromUrl(amqpUrl string) (Connection, error) {
 	return connectToAmqp(amqpUrl)
 }
@@ -76,47 +79,69 @@ func New(config Config) (Connection, error) {
 	return connectToAmqp(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
 }
 
-// Create a new Event Stream Listener
-// The passed IncomingMessageHandler will be called with the message after deserialization
-func (c connection) NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) {
+func (c connection) NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) error {
 	invoker, err := checkHandler(handler)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	msgs := c.eventListener(svcName, routingKey)
+	msgs, err := c.eventListener(svcName, routingKey)
+	if err != nil {
+		return err
+	}
 	go listener(msgs, invoker, handler)
+	return nil
 }
 
-func (c connection) NewServiceListener(svcName, routingKey string, handler IncomingMessageHandler) {
+func (c connection) NewServiceListener(svcName, routingKey string, handler IncomingMessageHandler) error {
 	invoker, err := checkHandler(handler)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	msgs := c.serviceListener(svcName, routingKey)
+
+	msgs, err := c.serviceListener(svcName, routingKey)
+	if err != nil {
+		return err
+	}
 	go listener(msgs, invoker, handler)
+	return nil
 }
 
-func (c connection) NewEventStreamPublisher(routingKey string) chan interface{} {
-	c.setupEventExchange()
+func failOnError(err error, msg ...string) {
+	if err != nil {
+		log.Fatalf("%v %v", msg, err)
+	}
+}
+
+func (c connection) NewEventStreamPublisher(routingKey string) (chan interface{}, error) {
+	fmt.Println("A")
+	if err := c.setupEventExchange(); err != nil {
+	fmt.Println("AAAA")
+		return nil, err
+	}
+
+	fmt.Println("B")
 	p := make(chan interface{})
-	go c.publisher(p, routingKey, eventExchangeName)
-	return p
+	fmt.Println("C")
+
+	go c.publisher(p, routingKey, eventsExchange)
+	return p, nil
 }
 
-func (c connection) NewServicePublisher(svcName, routingKey string) chan interface{} {
-	c.setupServiceExchange(svcName)
+func (c connection) NewServicePublisher(svcName, routingKey string) (chan interface{}, error) {
+	if err := c.setupServiceExchange(svcName); err != nil {
+		return nil, err
+	}
 	p := make(chan interface{})
 	go c.publisher(p, routingKey, serviceExchangeName(svcName))
-	return p
+	return p, nil
 }
 
 func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName string) {
 	for msg := range p {
 		log.Println("publishing message to event stream")
 		jsonBytes, err := json.Marshal(msg)
-		if err != nil {
-			log.Fatal("failed to transform json", err)
-		}
+		failOnError(err, "failed to transform json")
+
 		err = c.channel.Publish(exchangeName,
 			routingKey,
 			false,
@@ -126,16 +151,17 @@ func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName str
 				ContentType: "application/json",
 			},
 		)
-		if err != nil {
-			log.Fatal("failed to publish event", err)
-		}
+		failOnError(err, "failed to publish event")
 		log.Println("published message to event stream", string(jsonBytes))
 	}
 }
 
 func listener(msgs <-chan amqp.Delivery, invoker reflect.Value, handler IncomingMessageHandler) {
+	fmt.Println("Started listener")
 	for d := range msgs {
+		log.Println("Received")
 		message := parseMessage(d, handler)
+		log.Println("Parsed")
 
 		args := []reflect.Value{reflect.ValueOf(handler), reflect.ValueOf(message).Elem()}
 		call := invoker.Call(args)[0]
@@ -166,32 +192,38 @@ func connectToAmqp(amqpUrl string) (Connection, error) {
 	}, nil
 }
 
-func (c connection) eventListener(service, routingKey string) <-chan amqp.Delivery {
-	// TODO Errorhandling
-	c.setupEventExchange()
-	_, _ = c.declareEventQueue(service)
-	_ = c.bindToEventTopic(service, routingKey)
-	delivery, _ := c.consumeEventQueue(service)
-	return delivery
+func (c connection) eventListener(service, routingKey string) (<-chan amqp.Delivery, error) {
+	if err := c.setupEventExchange(); err != nil {
+		return nil, err
+	}
+	if _, err := c.declareEventQueue(service); err != nil {
+		return nil, err
+	}
+	if err := c.bindToEventTopic(service, routingKey); err != nil {
+		return nil, err
+	}
+	return c.consumeEventQueue(service)
 }
 
-func (c connection) serviceListener(service, routingKey string) <-chan amqp.Delivery {
-	// TODO Errorhandling
-	c.setupServiceExchange(service)
-	_, _ = c.declareServiceQueue(service)
-	_ = c.bindToService(service, routingKey)
-	delivery, _ := c.consumeRequestQueue(service)
-	return delivery
+func (c connection) serviceListener(service, routingKey string) (<-chan amqp.Delivery, error) {
+	if err := c.setupServiceExchange(service); err != nil {
+		return nil, err
+	}
+	if _, err := c.declareServiceQueue(service); err != nil {
+		return nil, err
+	}
+	if err := c.bindToService(service, routingKey); err != nil {
+		return nil, err
+	}
+	return c.consumeRequestQueue(service)
 }
 
-func (c connection) setupEventExchange() {
-	// TODO Errorhandling
-	_ = c.eventsExchange()
+func (c connection) setupEventExchange() error {
+	return c.eventsExchange()
 }
 
-func (c connection) setupServiceExchange(service string) {
-	// TODO Errorhandling
-	_ = c.serviceExchange(service)
+func (c connection) setupServiceExchange(service string) error {
+	return c.serviceExchange(service)
 }
 
 func parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) interface{} {
@@ -203,10 +235,8 @@ func parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) interf
 	return res
 }
 
-var eventExchangeName = "events.topic.exchange"
-
 func (c connection) eventsExchange() error {
-	return c.exchangeDeclare(eventExchangeName)
+	return c.exchangeDeclare(eventsExchange)
 }
 
 func (c connection) serviceExchange(svcName string) error {
@@ -230,7 +260,7 @@ func (c connection) exchangeDeclare(name string) error {
 }
 
 func serviceEventQueueName(service string) string {
-	return fmt.Sprintf("%s.queue.%s", eventExchangeName, service)
+	return fmt.Sprintf("%s.queue.%s", eventsExchange, service)
 }
 
 func serviceRequestQueueName(service string) string {
@@ -256,7 +286,7 @@ func (c connection) queueDeclare(name string) (amqp.Queue, error) {
 }
 
 func (c connection) bindToEventTopic(service, routingKey string) error {
-	return c.channel.QueueBind(serviceEventQueueName(service), routingKey, eventExchangeName, false, nil)
+	return c.channel.QueueBind(serviceEventQueueName(service), routingKey, eventsExchange, false, nil)
 }
 
 func (c connection) bindToService(service, routingKey string) error {
@@ -282,7 +312,6 @@ func (c connection) consume(queue string) (<-chan amqp.Delivery, error) {
 		nil,
 	)
 }
-
 
 func checkHandler(handler IncomingMessageHandler) (reflect.Value, error) {
 	m, ok := reflect.TypeOf(handler).MethodByName("Process")
