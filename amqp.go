@@ -140,7 +140,7 @@ func (c connection) NewEventStreamPublisher(routingKey string) (chan interface{}
 }
 
 func (c connection) NewServicePublisher(svcName, routingKey string) (chan interface{}, error) {
-	if err := c.setupServiceExchange(svcName); err != nil {
+	if err := c.setupServiceExchanges(svcName); err != nil {
 		return nil, err
 	}
 	p := make(chan interface{})
@@ -202,7 +202,7 @@ func (c connection) eventListener(service, routingKey string) (<-chan amqp.Deliv
 }
 
 func (c connection) serviceListener(service, routingKey string) (<-chan amqp.Delivery, error) {
-	if err := c.setupServiceExchange(service); err != nil {
+	if err := c.setupServiceExchanges(service); err != nil {
 		return nil, err
 	}
 	if _, err := c.declareServiceQueue(service); err != nil {
@@ -218,8 +218,11 @@ func (c connection) setupEventExchange() error {
 	return c.eventsExchange()
 }
 
-func (c connection) setupServiceExchange(service string) error {
-	return c.serviceExchange(service)
+func (c connection) setupServiceExchanges(service string) error {
+	if err := c.serviceRequestExchange(service); err != nil {
+		return err
+	}
+	return c.serviceResponseExchange(service)
 }
 
 func parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) interface{} {
@@ -232,21 +235,25 @@ func parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) interf
 }
 
 func (c connection) eventsExchange() error {
-	return c.exchangeDeclare(eventsExchange)
+	return c.exchangeDeclare(eventsExchange, "topic")
 }
 
-func (c connection) serviceExchange(svcName string) error {
-	return c.exchangeDeclare(serviceExchangeName(svcName))
+func (c connection) serviceRequestExchange(svcName string) error {
+	return c.exchangeDeclare(serviceExchangeName(svcName), "direct")
+}
+
+func (c connection) serviceResponseExchange(svcName string) error {
+	return c.exchangeDeclare(serviceExchangeName(svcName), "headers")
 }
 
 func serviceExchangeName(svcName string) string {
 	return fmt.Sprintf("%s.topic.exchange", svcName)
 }
 
-func (c connection) exchangeDeclare(name string) error {
+func (c connection) exchangeDeclare(name, kind string) error {
 	return c.channel.ExchangeDeclare(
 		name,
-		"topic",
+		kind,
 		true,
 		false,
 		false,
