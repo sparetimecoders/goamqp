@@ -7,17 +7,19 @@ import (
 	"github.com/streadway/amqp"
 	"log"
 	"reflect"
+	"time"
 )
 
 // TODO This is WIP and a lot of refactoring will happen!
 
 // A Config that contains the necessary variables for connecting to RabbitMQ.
 type Config struct {
-	Username string `env:"RABBITMQ_USERNAME,required"`
-	Password string `env:"RABBITMQ_PASSWORD,required"`
-	Host     string `env:"RABBITMQ_HOST,required"`
-	Port     int    `env:"RABBITMQ_PORT" envDefault:"5672"`
-	VHost    string `env:"RABBITMQ_VHOST" envDefault:""`
+	Username                string `env:"RABBITMQ_USERNAME,required"`
+	Password                string `env:"RABBITMQ_PASSWORD,required"`
+	Host                    string `env:"RABBITMQ_HOST,required"`
+	Port                    int    `env:"RABBITMQ_PORT" envDefault:"5672"`
+	VHost                   string `env:"RABBITMQ_VHOST" envDefault:""`
+	DelayedMessageSupported bool   `env:"RABBITMQ_DELAYED_MESSAGING" envDefault:"false"`
 }
 
 // IncomingMessageHandler is a marker interface for implementations that want to register as message handlers.
@@ -44,6 +46,13 @@ type IncomingMessageHandler interface {
 	Type() interface{}
 }
 
+// A DelayedMessage TODO
+// The delayed messaging plugin must be installed on the RabbitMQ server to enable this functionality.
+// https://github.com/rabbitmq/rabbitmq-delayed-message-exchange
+type DelayedMessage interface {
+	TTL() time.Duration
+}
+
 // Connection is used to setup new listeners and publishers.
 type Connection interface {
 	// Create a new Event Stream Listener
@@ -62,8 +71,9 @@ type Connection interface {
 
 // Internal state
 type connection struct {
-	connection *amqp.Connection
-	channel    *amqp.Channel
+	connection       *amqp.Connection
+	channel          *amqp.Channel
+	delayedMessaging bool
 }
 
 var _ Connection = &connection{}
@@ -71,24 +81,37 @@ var eventsExchange = serviceExchangeName("events")
 
 // Connect to a RabbitMQ instance
 func NewFromUrl(amqpUrl string) (Connection, error) {
-	conn, err := amqp.Dial(amqpUrl)
-	if err != nil {
-		return nil, err
-	}
-	ch, err := conn.Channel()
-	if err != nil {
-		return nil, err
-	}
-
+	conn, ch, err := connectToAmqpUrl(amqpUrl)
 	return &connection{
-		connection: conn,
-		channel:    ch,
-	}, nil
+		connection:       conn,
+		channel:          ch,
+		delayedMessaging: false,
+	}, err
 }
 
 // Connect to a RabbitMQ instance
 func New(config Config) (Connection, error) {
-	return NewFromUrl(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
+	conn, ch, err := connectToAmqpUrl(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
+	return &connection{
+		connection:       conn,
+		channel:          ch,
+		delayedMessaging: config.DelayedMessageSupported,
+	}, err
+}
+
+func connectToAmqpUrl(amqpUrl string) (*amqp.Connection, *amqp.Channel, error) {
+	// TODO Filter password from URL
+	log.Printf("connecting to %s", amqpUrl)
+
+	conn, err := amqp.Dial(amqpUrl)
+	if err != nil {
+		return nil, nil, err
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, ch, nil
 }
 
 func (c connection) NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) error {
@@ -125,16 +148,10 @@ func failOnError(err error, msg ...string) {
 }
 
 func (c connection) NewEventStreamPublisher(routingKey string) (chan interface{}, error) {
-	fmt.Println("A")
 	if err := c.setupEventExchange(); err != nil {
-	fmt.Println("AAAA")
 		return nil, err
 	}
-
-	fmt.Println("B")
 	p := make(chan interface{})
-	fmt.Println("C")
-
 	go c.publisher(p, routingKey, eventsExchange)
 	return p, nil
 }
@@ -251,6 +268,12 @@ func serviceExchangeName(svcName string) string {
 }
 
 func (c connection) exchangeDeclare(name, kind string) error {
+	log.Printf("creating exchange with name %s", name)
+	args := amqp.Table{}
+	if c.delayedMessaging {
+		args["x-delayed-type"] = kind
+		kind = "x-delayed-message"
+	}
 	return c.channel.ExchangeDeclare(
 		name,
 		kind,
@@ -258,7 +281,7 @@ func (c connection) exchangeDeclare(name, kind string) error {
 		false,
 		false,
 		false,
-		nil,
+		args,
 	)
 }
 
