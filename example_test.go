@@ -27,7 +27,7 @@ func (IncomingMessage) TTL() time.Duration {
 }
 */
 //
-func ExampleNewEventStreamListener() {
+func Example() {
 
 	config := go_amqp.Config{
 		AmqpConfig: go_amqp.AmqpConfig{
