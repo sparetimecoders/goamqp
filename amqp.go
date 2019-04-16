@@ -12,16 +12,6 @@ import (
 
 // TODO This is WIP and a lot of refactoring will happen!
 
-// A Config that contains the necessary variables for connecting to RabbitMQ.
-type Config struct {
-	Username                string `env:"RABBITMQ_USERNAME,required"`
-	Password                string `env:"RABBITMQ_PASSWORD,required"`
-	Host                    string `env:"RABBITMQ_HOST,required"`
-	Port                    int    `env:"RABBITMQ_PORT" envDefault:"5672"`
-	VHost                   string `env:"RABBITMQ_VHOST" envDefault:""`
-	DelayedMessageSupported bool   `env:"RABBITMQ_DELAYED_MESSAGING" envDefault:"false"`
-}
-
 // IncomingMessageHandler is a marker interface for implementations that want to register as message handlers.
 // Implementations MUST implement a Process method with a single argument of the type returned by the Type() method.
 // The conditions will be checked during 'registration' of the handler.
@@ -70,58 +60,29 @@ type Connection interface {
 	NewServicePublisher(svcName, routingKey string) (chan interface{}, error)
 }
 
-type amqpChannel interface {
-	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
-	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
-	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
-	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
-	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+// Config contains information about how to connect to and setup rabbitmq
+type Config struct {
+	AmqpConfig
+	DelayedMessageSupported bool `env:"RABBITMQ_DELAYED_MESSAGING" envDefault:"false"`
 }
-
-// Internal state
-type connection struct {
-	connection       *amqp.Connection
-	channel          amqpChannel
-	delayedMessaging bool
-}
-
-var _ amqpChannel = &amqp.Channel{}
-var _ Connection = &connection{}
-var eventsExchange = eventsExchangeName()
 
 // Connect to a RabbitMQ instance
 func NewFromUrl(amqpUrl string) (Connection, error) {
-	conn, ch, err := connectToAmqpUrl(amqpUrl)
-	return &connection{
-		connection:       conn,
-		channel:          ch,
-		delayedMessaging: false,
-	}, err
+	amqpConfig, err := ParseAmqpUrl(amqpUrl)
+	if err != nil {
+		return connection{}, err
+	}
+	return New(Config{amqpConfig, false})
 }
 
 // Connect to a RabbitMQ instance
 func New(config Config) (Connection, error) {
-	conn, ch, err := connectToAmqpUrl(fmt.Sprintf("amqp://%s:%s@%s:%d/%s", config.Username, config.Password, config.Host, config.Port, config.VHost))
+	conn, ch, err := connectToAmqpUrl(config)
 	return &connection{
-		connection:       conn,
-		channel:          ch,
-		delayedMessaging: config.DelayedMessageSupported,
+		connection: conn,
+		channel:    ch,
+		config:     config,
 	}, err
-}
-
-func connectToAmqpUrl(amqpUrl string) (*amqp.Connection, *amqp.Channel, error) {
-	// TODO Filter password from URL
-	log.Printf("connecting to %s", amqpUrl)
-
-	conn, err := amqp.Dial(amqpUrl)
-	if err != nil {
-		return nil, nil, err
-	}
-	ch, err := conn.Channel()
-	if err != nil {
-		return nil, nil, err
-	}
-	return conn, ch, nil
 }
 
 func (c connection) NewEventStreamListener(svcName, routingKey string, handler IncomingMessageHandler) error {
@@ -173,6 +134,39 @@ func (c connection) NewServicePublisher(svcName, routingKey string) (chan interf
 	p := make(chan interface{})
 	go c.publisher(p, routingKey, serviceRequestExchangeName(svcName))
 	return p, nil
+}
+
+type amqpChannel interface {
+	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
+	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
+	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
+	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
+	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+}
+
+// Internal state
+type connection struct {
+	connection *amqp.Connection
+	channel    amqpChannel
+	config     Config
+}
+
+var _ amqpChannel = &amqp.Channel{}
+var _ Connection = &connection{}
+var eventsExchange = eventsExchangeName()
+
+func connectToAmqpUrl(config Config) (*amqp.Connection, *amqp.Channel, error) {
+	log.Printf("connecting to %s", config.AmqpConfig)
+
+	conn, err := amqp.Dial(config.AmqpUrl())
+	if err != nil {
+		return nil, nil, err
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, ch, nil
 }
 
 func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName string) {
@@ -296,7 +290,7 @@ func serviceResponseExchangeName(svcName string) string {
 func (c connection) exchangeDeclare(name, kind string) error {
 	log.Printf("creating exchange with name %s", name)
 	args := amqp.Table{}
-	if c.delayedMessaging {
+	if c.config.DelayedMessageSupported {
 		args["x-delayed-type"] = kind
 		kind = "x-delayed-message"
 	}

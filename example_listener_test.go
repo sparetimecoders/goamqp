@@ -31,18 +31,21 @@ func (IncomingMessage) TTL() time.Duration {
 func xTestI(t *testing.T) {
 
 	config := go_amqp.Config{
-		Host:                    "localhost",
-		Port:                    5672,
-		Username:                "admin",
-		Password:                "password",
-		VHost:                   "",
+		AmqpConfig: go_amqp.AmqpConfig{
+
+			Host:     "localhost",
+			Port:     5672,
+			Username: "admin",
+			Password: "password",
+			VHost:    "",
+		},
 		DelayedMessageSupported: true,
 	}
 	connection, err := go_amqp.New(config)
 	if err != nil {
 		log.Fatalln("failed to connect", err)
 	}
-	err = connection.NewEventStreamListener("test-service", "testkey", TestIncomingMessageHandler{})
+	err = connection.NewEventStreamListener("test-service", "testkey", &TestIncomingMessageHandler{})
 	if err != nil {
 		log.Fatalln("failed to create listener", err)
 	}
