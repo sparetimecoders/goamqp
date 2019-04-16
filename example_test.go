@@ -5,27 +5,10 @@ import (
 	"gitlab.com/sparetimecoders/go_amqp"
 	"log"
 	"math/rand"
-	"strings"
 	"time"
 )
 
-func (p IncomingMessage) Process() bool {
-	fmt.Println(p.Url)
-	if strings.Contains(p.Url, "OK") {
-		return true
-	}
-	return false
-}
-
-type IncomingMessage struct {
-	Url string
-}
-
-func (IncomingMessage) TTL() time.Duration {
-	return time.Minute
-}
-
-func ExampleConnection_NewEventStreamListener() {
+func Example() {
 
 	config := go_amqp.Config{
 		AmqpConfig: go_amqp.AmqpConfig{
@@ -47,7 +30,6 @@ func ExampleConnection_NewEventStreamListener() {
 		log.Fatalln("failed to create listener", err)
 	}
 	p, err := connection.NewEventStreamPublisher("testkey")
-	fmt.Println(err)
 	if err != nil {
 		log.Fatalln("failed to create publisher", err)
 	}
@@ -64,7 +46,6 @@ func ExampleConnection_NewEventStreamListener() {
 			p <- IncomingMessage{"OK"}
 		}
 	}
-
 }
 
 type TestIncomingMessageHandler struct {
@@ -78,4 +59,12 @@ func (TestIncomingMessageHandler) Type() interface{} {
 func (i TestIncomingMessageHandler) Process(m IncomingMessage) bool {
 	fmt.Printf("Called process with %v and ctx %v\n", m, i.ctx)
 	return true
+}
+
+type IncomingMessage struct {
+	Url string
+}
+
+func (IncomingMessage) TTL() time.Duration {
+	return time.Minute
 }
