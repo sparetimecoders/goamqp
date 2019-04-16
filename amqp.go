@@ -46,7 +46,8 @@ type IncomingMessageHandler interface {
 	Type() interface{}
 }
 
-// A DelayedMessage TODO
+// A DelayedMessage indicates that the message will not be delivered before the given TTL has passed.
+//
 // The delayed messaging plugin must be installed on the RabbitMQ server to enable this functionality.
 // https://github.com/rabbitmq/rabbitmq-delayed-message-exchange
 type DelayedMessage interface {
@@ -69,15 +70,24 @@ type Connection interface {
 	NewServicePublisher(svcName, routingKey string) (chan interface{}, error)
 }
 
+type amqpChannel interface {
+	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
+	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
+	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
+	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
+	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+}
+
 // Internal state
 type connection struct {
 	connection       *amqp.Connection
-	channel          *amqp.Channel
+	channel          amqpChannel
 	delayedMessaging bool
 }
 
+var _ amqpChannel = &amqp.Channel{}
 var _ Connection = &connection{}
-var eventsExchange = serviceExchangeName("events")
+var eventsExchange = eventsExchangeName()
 
 // Connect to a RabbitMQ instance
 func NewFromUrl(amqpUrl string) (Connection, error) {
@@ -161,7 +171,7 @@ func (c connection) NewServicePublisher(svcName, routingKey string) (chan interf
 		return nil, err
 	}
 	p := make(chan interface{})
-	go c.publisher(p, routingKey, serviceExchangeName(svcName))
+	go c.publisher(p, routingKey, serviceRequestExchangeName(svcName))
 	return p, nil
 }
 
@@ -171,13 +181,20 @@ func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName str
 		jsonBytes, err := json.Marshal(msg)
 		failOnError(err, "failed to transform json")
 
+		headers := amqp.Table{}
+		if dm, ok := msg.(DelayedMessage); ok {
+			headers["x-delay"] = fmt.Sprintf("%.0f", dm.TTL().Seconds()*1000)
+		}
+
 		err = c.channel.Publish(exchangeName,
 			routingKey,
 			false,
 			false,
 			amqp.Publishing{
-				Body:        jsonBytes,
-				ContentType: "application/json",
+				Body:         jsonBytes,
+				ContentType:  "application/json",
+				DeliveryMode: 2,
+				Headers:      headers,
 			},
 		)
 		failOnError(err, "failed to publish event")
@@ -186,11 +203,8 @@ func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName str
 }
 
 func listener(msgs <-chan amqp.Delivery, invoker reflect.Value, handler IncomingMessageHandler) {
-	fmt.Println("Started listener")
 	for d := range msgs {
-		log.Println("Received")
 		message := parseMessage(d, handler)
-		log.Println("Parsed")
 
 		args := []reflect.Value{reflect.ValueOf(handler), reflect.ValueOf(message).Elem()}
 		call := invoker.Call(args)[0]
@@ -255,16 +269,28 @@ func (c connection) eventsExchange() error {
 	return c.exchangeDeclare(eventsExchange, "topic")
 }
 
+func eventsExchangeName() string {
+	return exchangeName("events", "topic")
+}
+
+func exchangeName(svcName, kind string) string {
+	return fmt.Sprintf("%s.%s.exchange", svcName, kind)
+}
+
 func (c connection) serviceRequestExchange(svcName string) error {
-	return c.exchangeDeclare(serviceExchangeName(svcName), "direct")
+	return c.exchangeDeclare(serviceRequestExchangeName(svcName), "direct")
+}
+
+func serviceRequestExchangeName(svcName string) string {
+	return fmt.Sprintf("%s.direct.exchange.request", svcName)
 }
 
 func (c connection) serviceResponseExchange(svcName string) error {
-	return c.exchangeDeclare(serviceExchangeName(svcName), "headers")
+	return c.exchangeDeclare(serviceResponseExchangeName(svcName), "headers")
 }
 
-func serviceExchangeName(svcName string) string {
-	return fmt.Sprintf("%s.topic.exchange", svcName)
+func serviceResponseExchangeName(svcName string) string {
+	return fmt.Sprintf("%s.headers.exchange.response", svcName)
 }
 
 func (c connection) exchangeDeclare(name, kind string) error {
@@ -290,7 +316,7 @@ func serviceEventQueueName(service string) string {
 }
 
 func serviceRequestQueueName(service string) string {
-	return fmt.Sprintf("%s.request.queue", service)
+	return fmt.Sprintf("%s.queue", serviceRequestExchangeName(service))
 }
 
 func (c connection) declareEventQueue(service string) (amqp.Queue, error) {
@@ -307,16 +333,16 @@ func (c connection) queueDeclare(name string) (amqp.Queue, error) {
 		false,
 		false,
 		false,
-		nil,
+		amqp.Table{},
 	)
 }
 
 func (c connection) bindToEventTopic(service, routingKey string) error {
-	return c.channel.QueueBind(serviceEventQueueName(service), routingKey, eventsExchange, false, nil)
+	return c.channel.QueueBind(serviceEventQueueName(service), routingKey, eventsExchange, false, amqp.Table{})
 }
 
 func (c connection) bindToService(service, routingKey string) error {
-	return c.channel.QueueBind(serviceRequestQueueName(service), routingKey, serviceExchangeName(service), false, nil)
+	return c.channel.QueueBind(serviceRequestQueueName(service), routingKey, serviceRequestExchangeName(service), false, amqp.Table{})
 }
 
 func (c connection) consumeEventQueue(service string) (<-chan amqp.Delivery, error) {
@@ -335,13 +361,16 @@ func (c connection) consume(queue string) (<-chan amqp.Delivery, error) {
 		false,
 		false,
 		false,
-		nil,
+		amqp.Table{},
 	)
 }
 
 func checkHandler(handler IncomingMessageHandler) (reflect.Value, error) {
-	m, ok := reflect.TypeOf(handler).MethodByName("Process")
 	errValue := reflect.Value{}
+	if reflect.TypeOf(handler).Kind() != reflect.Ptr {
+		return errValue, errors.New(fmt.Sprintf("handler is not a pointer"))
+	}
+	m, ok := reflect.TypeOf(handler).MethodByName("Process")
 	if !ok {
 		return errValue, errors.New(fmt.Sprintf("missing method Process on handler, %s", reflect.TypeOf(handler).Elem()))
 	}

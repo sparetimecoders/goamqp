@@ -22,21 +22,27 @@ type IncomingMessage struct {
 	Url string
 }
 
-func x_TestName(t *testing.T) {
+/*
+func (IncomingMessage) TTL() time.Duration {
+	return time.Minute
+}
+*/
+
+func xTestI(t *testing.T) {
 
 	config := go_amqp.Config{
-		Host:     "localhost",
-		Port:     5672,
-		Username: "admin",
-		Password: "password",
-		VHost:    "",
+		Host:                    "localhost",
+		Port:                    5672,
+		Username:                "admin",
+		Password:                "password",
+		VHost:                   "",
+		DelayedMessageSupported: true,
 	}
 	connection, err := go_amqp.New(config)
 	if err != nil {
 		log.Fatalln("failed to connect", err)
 	}
-
-	err = connection.NewEventStreamListener("test-service", "testkey", IncomingMessageHandler{})
+	err = connection.NewEventStreamListener("test-service", "testkey", TestIncomingMessageHandler{})
 	if err != nil {
 		log.Fatalln("failed to create listener", err)
 	}
@@ -60,15 +66,15 @@ func x_TestName(t *testing.T) {
 	}
 }
 
-type IncomingMessageHandler struct {
+type TestIncomingMessageHandler struct {
 	ctx string
 }
 
-func (IncomingMessageHandler) Type() interface{} {
+func (TestIncomingMessageHandler) Type() interface{} {
 	return IncomingMessage{}
 }
 
-func (i IncomingMessageHandler) Process(m IncomingMessage) bool {
+func (i TestIncomingMessageHandler) Process(m IncomingMessage) bool {
 	fmt.Printf("Called process with %v and ctx %v\n", m, i.ctx)
 	return true
 }

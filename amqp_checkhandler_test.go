@@ -17,6 +17,7 @@ func TestCheckHandlerMissingMethod(t *testing.T) {
 	_, err := checkHandler(&missingProcess{})
 	assert.EqualError(t, err, "missing method Process on handler, go_amqp.missingProcess")
 }
+
 type incorrectProcessArgumentCount struct{}
 
 func (incorrectProcessArgumentCount) Process() {}
@@ -52,7 +53,7 @@ func TestCheckHandlerMissingReturnValue(t *testing.T) {
 
 type incorrectProcessReturn struct{}
 
-func (incorrectProcessReturn) Process(msg Message) string {return ""}
+func (incorrectProcessReturn) Process(msg Message) string { return "" }
 
 func (incorrectProcessReturn) Type() interface{} { return Message{} }
 
@@ -63,11 +64,16 @@ func TestCheckHandlerIncorrectReturn(t *testing.T) {
 
 type correctIncomingMessageHandler struct{}
 
-func (correctIncomingMessageHandler) Process(msg Message) bool {return true}
+func (correctIncomingMessageHandler) Process(msg Message) bool { return true }
 
 func (correctIncomingMessageHandler) Type() interface{} { return Message{} }
 
 func TestCheckHandlerCorrectIncomingMessageHandler(t *testing.T) {
 	_, err := checkHandler(&correctIncomingMessageHandler{})
 	assert.NoError(t, err)
+}
+
+func TestCheckHandlerNotAPointer(t *testing.T) {
+	_, err := checkHandler(correctIncomingMessageHandler{})
+	assert.Error(t, err, "handler is not a pointer")
 }
