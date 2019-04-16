@@ -21,12 +21,10 @@ type IncomingMessage struct {
 	Url string
 }
 
-/*
 func (IncomingMessage) TTL() time.Duration {
 	return time.Minute
 }
-*/
-//
+
 func Example() {
 
 	config := go_amqp.Config{
@@ -66,7 +64,6 @@ func Example() {
 			p <- IncomingMessage{"OK"}
 		}
 	}
-	// Output: test
 
 }
 
