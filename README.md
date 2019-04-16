@@ -8,8 +8,5 @@ Download:
 go get gitlab.com/sparetimecoders/go_amqp
 ```
 
-* * *
-Package go_amqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
-
 
 
