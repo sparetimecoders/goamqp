@@ -6,7 +6,6 @@ import (
 	"log"
 	"math/rand"
 	"strings"
-	"testing"
 	"time"
 )
 
@@ -27,8 +26,8 @@ func (IncomingMessage) TTL() time.Duration {
 	return time.Minute
 }
 */
-
-func xTestI(t *testing.T) {
+//
+func ExampleNewEventStreamListener() {
 
 	config := go_amqp.Config{
 		AmqpConfig: go_amqp.AmqpConfig{
@@ -67,6 +66,8 @@ func xTestI(t *testing.T) {
 			p <- IncomingMessage{"OK"}
 		}
 	}
+	// Output: test
+
 }
 
 type TestIncomingMessageHandler struct {

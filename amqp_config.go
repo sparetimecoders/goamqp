@@ -18,7 +18,7 @@ type AmqpConfig struct {
 	VHost    string `env:"RABBITMQ_VHOST" envDefault:""`
 }
 
-
+// ParseAmqpUrl tries to parse the passed string and create a valic AmqpConfig object
 func ParseAmqpUrl(amqpUrl string) (AmqpConfig, error) {
 	var amqpConnectionRegex = regexp.MustCompile(`(?:amqp:\/\/)?(?P<Host>.*):(?P<Username>.*)@(?P<Password>.*?)(?:\:(?P<Port>\d*))?(?:\/(?P<VHost>.*))?$`)
 	if amqpConnectionRegex.MatchString(amqpUrl) {
@@ -26,6 +26,11 @@ func ParseAmqpUrl(amqpUrl string) (AmqpConfig, error) {
 	} else {
 		return AmqpConfig{}, errors.New(fmt.Sprintf("connection url is invalid, %s", amqpUrl))
 	}
+}
+
+// AmqpUrl returns a valid connection url
+func (c AmqpConfig) AmqpUrl() string {
+	return fmt.Sprintf("amqp://%s:%s@%s:%d/%s", c.Username, c.Password, c.Host, c.Port, c.VHost)
 }
 
 func convertToAmqpConfig(mappedValues map[string]string) *AmqpConfig {
@@ -78,8 +83,4 @@ func (c AmqpConfig) String() string {
 	copy := config(c)
 	copy.Password = "********"
 	return fmt.Sprintf("%+v", copy)
-}
-
-func (c AmqpConfig) AmqpUrl() string {
-	return fmt.Sprintf("amqp://%s:%s@%s:%d/%s", c.Username, c.Password, c.Host, c.Port, c.VHost)
 }

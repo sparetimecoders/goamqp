@@ -112,6 +112,7 @@ func (c connection) NewServiceListener(svcName, routingKey string, handler Incom
 	return nil
 }
 
+// TODO Remove this!
 func failOnError(err error, msg ...string) {
 	if err != nil {
 		log.Fatalf("%v %v", msg, err)
