@@ -30,8 +30,7 @@ import (
 func Example() {
 
 	config := go_amqp.Config{
-		AmqpConfig: go_amqp.AmqpConfig{
-
+		AmqpConfig: &go_amqp.AmqpConfig{
 			Host:     "localhost",
 			Port:     5672,
 			Username: "admin",

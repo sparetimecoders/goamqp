@@ -20,7 +20,9 @@
 package go_amqp
 
 import (
+	"github.com/caarlos0/env"
 	"github.com/stretchr/testify/assert"
+	"os"
 	"testing"
 )
 
@@ -79,4 +81,23 @@ func TestParseUrlInvalid(t *testing.T) {
 	_, err := ParseAmqpUrl("amqp://localhost:user:67333/a")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connection url is invalid")
+}
+
+func TestEnvParse(t *testing.T) {
+	_ = os.Setenv("RABBITMQ_HOST", "a")
+	_ = os.Setenv("RABBITMQ_PORT", "1234")
+	_ = os.Setenv("RABBITMQ_VHOST", "b")
+	_ = os.Setenv("RABBITMQ_USERNAME", "c")
+	_ = os.Setenv("RABBITMQ_PASSWORD", "d")
+	_ = os.Setenv("RABBITMQ_DELAYED_MESSAGING", "true")
+
+	c := &Config{AmqpConfig:&AmqpConfig{}}
+	_ = env.Parse(c)
+
+	assert.Equal(t, true, c.DelayedMessageSupported)
+	assert.Equal(t, "a", c.Host)
+	assert.Equal(t, 1234, c.Port)
+	assert.Equal(t, "b", c.VHost)
+	assert.Equal(t, "c", c.Username)
+	assert.Equal(t, "d", c.Password)
 }
