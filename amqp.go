@@ -81,7 +81,7 @@ type Connection interface {
 
 // Config contains information about how to connect to and setup rabbitmq
 type Config struct {
-	AmqpConfig
+	*AmqpConfig
 	DelayedMessageSupported bool `env:"RABBITMQ_DELAYED_MESSAGING" envDefault:"false"`
 }
 
@@ -91,7 +91,7 @@ func NewFromUrl(amqpUrl string) (Connection, error) {
 	if err != nil {
 		return connection{}, err
 	}
-	return New(Config{amqpConfig, false})
+	return New(Config{&amqpConfig, false})
 }
 
 // Connect to a RabbitMQ instance
