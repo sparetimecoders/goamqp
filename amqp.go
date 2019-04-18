@@ -349,7 +349,7 @@ func (c connection) queueDeclare(name string) (amqp.Queue, error) {
 		false,
 		false,
 		false,
-		amqp.Table{"x-expires": fmt.Sprintf("%.0f", deleteQueueAfter.Seconds()*1000)},
+		amqp.Table{"x-expires": int(deleteQueueAfter.Seconds() * 1000)},
 	)
 
 }
