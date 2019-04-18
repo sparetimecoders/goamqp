@@ -175,6 +175,8 @@ var _ amqpChannel = &amqp.Channel{}
 var _ Connection = &connection{}
 var eventsExchange = eventsExchangeName()
 
+var deleteQueueAfter = 5 * 24 * time.Hour
+
 func connectToAmqpUrl(config Config) (*amqp.Connection, *amqp.Channel, error) {
 	log.Printf("connecting to %s", config.AmqpConfig)
 
@@ -347,8 +349,9 @@ func (c connection) queueDeclare(name string) (amqp.Queue, error) {
 		false,
 		false,
 		false,
-		amqp.Table{},
+		amqp.Table{"x-expires": fmt.Sprintf("%.0f", deleteQueueAfter.Seconds()*1000)},
 	)
+
 }
 
 func (c connection) bindToEventTopic(service, routingKey string) error {
