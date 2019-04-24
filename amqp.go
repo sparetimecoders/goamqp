@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/streadway/amqp"
+	"gopkg.in/go-playground/validator.v9"
 	"log"
 	"reflect"
 	"time"
@@ -101,6 +102,7 @@ func New(config Config) (Connection, error) {
 		connection: conn,
 		channel:    ch,
 		config:     config,
+		validate:   validator.New(),
 	}, err
 }
 
@@ -113,7 +115,7 @@ func (c connection) NewEventStreamListener(svcName, routingKey string, handler I
 	if err != nil {
 		return err
 	}
-	go listener(msgs, invoker, handler)
+	go c.listener(msgs, invoker, handler)
 	return nil
 }
 
@@ -127,15 +129,8 @@ func (c connection) NewServiceListener(svcName, routingKey string, handler Incom
 	if err != nil {
 		return err
 	}
-	go listener(msgs, invoker, handler)
+	go c.listener(msgs, invoker, handler)
 	return nil
-}
-
-// TODO Remove this!
-func failOnError(err error, msg ...string) {
-	if err != nil {
-		log.Fatalf("%v %v", msg, err)
-	}
 }
 
 func (c connection) NewEventStreamPublisher(routingKey string) (chan interface{}, error) {
@@ -169,6 +164,7 @@ type connection struct {
 	connection *amqp.Connection
 	channel    amqpChannel
 	config     Config
+	validate   *validator.Validate
 }
 
 var _ amqpChannel = &amqp.Channel{}
@@ -195,41 +191,52 @@ func (c connection) publisher(p <-chan interface{}, routingKey, exchangeName str
 	for msg := range p {
 		log.Printf("publishing message to %s\n", exchangeName)
 		jsonBytes, err := json.Marshal(msg)
-		failOnError(err, "failed to transform json")
+		if err != nil {
+			log.Printf("failed to transform %+v to json, %v", msg, err)
+			continue
+		}
 
 		headers := amqp.Table{}
 		if dm, ok := msg.(DelayedMessage); ok {
 			headers["x-delay"] = fmt.Sprintf("%.0f", dm.TTL().Seconds()*1000)
 		}
 
+		publishing := amqp.Publishing{
+			Body:         jsonBytes,
+			ContentType:  "application/json",
+			DeliveryMode: 2,
+			Headers:      headers,
+		}
 		err = c.channel.Publish(exchangeName,
 			routingKey,
 			false,
 			false,
-			amqp.Publishing{
-				Body:         jsonBytes,
-				ContentType:  "application/json",
-				DeliveryMode: 2,
-				Headers:      headers,
-			},
+			publishing,
 		)
-		failOnError(err, "failed to publish event")
+		if err != nil {
+			log.Printf("failed to publish %+v to rabbit, %v", publishing, err)
+			continue
+		}
 		log.Printf("published message to %s: %s", exchangeName, string(jsonBytes))
 	}
 }
 
-func listener(msgs <-chan amqp.Delivery, invoker reflect.Value, handler IncomingMessageHandler) {
+func (c connection) listener(msgs <-chan amqp.Delivery, invoker reflect.Value, handler IncomingMessageHandler) {
 	for d := range msgs {
-		message := parseMessage(d, handler)
-
-		args := []reflect.Value{reflect.ValueOf(handler), reflect.ValueOf(message).Elem()}
-		call := invoker.Call(args)[0]
-		if call.Bool() {
-			log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
-			_ = d.Ack(false)
+		message, err := c.parseMessage(d, handler)
+		if err != nil {
+			log.Printf("failed to handle message - will drop it, %v", err)
+			d.Reject(false)
 		} else {
-			log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
-			_ = d.Nack(false, true)
+			args := []reflect.Value{reflect.ValueOf(handler), reflect.ValueOf(message).Elem()}
+			call := invoker.Call(args)[0]
+			if call.Bool() {
+				log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
+				_ = d.Ack(false)
+			} else {
+				log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
+				_ = d.Nack(false, true)
+			}
 		}
 	}
 
@@ -272,13 +279,22 @@ func (c connection) setupServiceExchanges(service string) error {
 	return c.serviceResponseExchange(service)
 }
 
-func parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) interface{} {
+func (c connection) parseMessage(delivery amqp.Delivery, handler IncomingMessageHandler) (interface{}, error) {
 	body := delivery.Body
-	res := reflect.New(reflect.TypeOf(handler.Type())).Elem().Addr().Interface()
-	if err := json.Unmarshal(body, &res); err != nil {
-		log.Fatalf("failed to deserialize json [%s]to struct, %v", string(body), err)
+	emptyStruct := reflect.New(reflect.TypeOf(handler.Type())).Elem().Addr().Interface()
+	return c.parseAndValidateJson(body, emptyStruct)
+}
+
+func (c connection) parseAndValidateJson(jsonContent []byte, target interface{}) (interface{}, error) {
+	if err := json.Unmarshal(jsonContent, &target); err != nil {
+		return target, err
 	}
-	return res
+
+	if err := c.validate.Struct(target); err != nil {
+		return target, err
+	}
+
+	return target, nil
 }
 
 func (c connection) eventsExchange() error {
@@ -385,25 +401,25 @@ func (c connection) consume(queue string) (<-chan amqp.Delivery, error) {
 func checkHandler(handler IncomingMessageHandler) (reflect.Value, error) {
 	errValue := reflect.Value{}
 	if reflect.TypeOf(handler).Kind() != reflect.Ptr {
-		return errValue, errors.New(fmt.Sprintf("handler is not a pointer"))
+		return errValue, errors.New("handler is not a pointer")
 	}
 	m, ok := reflect.TypeOf(handler).MethodByName("Process")
 	if !ok {
-		return errValue, errors.New(fmt.Sprintf("missing method Process on handler, %s", reflect.TypeOf(handler).Elem()))
+		return errValue, fmt.Errorf("missing method Process on handler, %s", reflect.TypeOf(handler).Elem())
 	}
 
 	methodType := m.Type
 	if methodType.NumIn() != 2 {
-		return errValue, errors.New(fmt.Sprintf("incorrect number of arguments, expected 1 but was %d", methodType.NumIn()-1))
+		return errValue, fmt.Errorf("incorrect number of arguments, expected 1 but was %d", methodType.NumIn()-1)
 	}
 	if methodType.In(1) != reflect.TypeOf(handler.Type()) {
-		return errValue, errors.New(fmt.Sprintf("incorrect in arguments. Expected Process(%s), actual Process(%s)", reflect.TypeOf(handler.Type()), methodType.In(1)))
+		return errValue, fmt.Errorf("incorrect in arguments. Expected Process(%s), actual Process(%s)", reflect.TypeOf(handler.Type()), methodType.In(1))
 	}
 	if methodType.NumOut() != 1 {
-		return errValue, errors.New(fmt.Sprintf("incorrect number of return values. Expected 1, actual %d", methodType.NumOut()))
+		return errValue, fmt.Errorf("incorrect number of return values. Expected 1, actual %d", methodType.NumOut())
 	}
 	if methodType.Out(0).Kind() != reflect.Bool {
-		return errValue, errors.New(fmt.Sprintf("incorrect return type for Process(%s). Expected bool, actual %v", reflect.TypeOf(handler.Type()), methodType.Out(0)))
+		return errValue, fmt.Errorf("incorrect return type for Process(%s). Expected bool, actual %v", reflect.TypeOf(handler.Type()), methodType.Out(0))
 	}
 	return m.Func, nil
 }

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/go-playground/validator.v9"
 	"testing"
 	"time"
 )
@@ -247,6 +248,7 @@ func TestServiceListener(t *testing.T) {
 	c := connection{
 		connection: nil,
 		channel:    &channel,
+		validate:   validator.New(),
 	}
 	handler := &MockIncomingMessageHandler{Received: make(chan TestMessage, 2)}
 	err := c.NewServiceListener("svc", "key", handler)
