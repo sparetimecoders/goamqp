@@ -91,7 +91,7 @@ func TestEnvParse(t *testing.T) {
 	_ = os.Setenv("RABBITMQ_PASSWORD", "d")
 	_ = os.Setenv("RABBITMQ_DELAYED_MESSAGING", "true")
 
-	c := &Config{AmqpConfig:&AmqpConfig{}}
+	c := &Config{AmqpConfig: &AmqpConfig{}}
 	_ = env.Parse(c)
 
 	assert.Equal(t, true, c.DelayedMessageSupported)
