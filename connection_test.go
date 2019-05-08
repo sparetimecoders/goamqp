@@ -1,6 +1,7 @@
 package goamqp
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"strings"
 	"testing"
@@ -21,6 +22,11 @@ func TestAddRequestResponseHandlerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "routingkey key for queue events.topic.exchange.queue.svc already assigned to handler goamqp.TestIncomingMessageHandler, cannot assign goamqp.TestIncomingMessageHandler")
 	assert.Contains(t, err.Error(), "routingkey key for queue svc.direct.exchange.request.queue already assigned to handler goamqp.RequestResponseMessageHandler, cannot assign goamqp.RequestResponseMessageHandler")
 	assert.Contains(t, err.Error(), "handler goamqp.incorrectProcessArgumentCount has incorrect number of arguments, expected 1 but was 0")
+}
+
+func TestFailingSetupFunc(t *testing.T) {
+	c := connection{setupFuncs: []setupFunc{func(channel amqpChannel) error { return nil }, func(channel amqpChannel) error { return fmt.Errorf("error message") }}}
+	assert.EqualError(t, c.setup(), "setup function <gitlab.com/sparetimecoders/goamqp.TestFailingSetupFunc.func2> failed, error message")
 }
 
 type TestIncomingMessageHandler struct{}

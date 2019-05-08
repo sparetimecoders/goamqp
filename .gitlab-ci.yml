@@ -50,7 +50,6 @@ test:
   image: golang:1.12
   script:
     - go get golang.org/x/lint/golint
-    - find . -name "rice-box.go" -delete
     - go fmt $(go list ./...)
     - go vet $(go list ./...)
     - golint -set_exit_status ./...

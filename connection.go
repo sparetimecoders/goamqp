@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -40,7 +41,13 @@ func New(serviceName string, config AmqpConfig) Connection {
 }
 
 func (c *connection) AddEventStreamPublisher(routingKey string, publisher chan interface{}) Connection {
-	c.appendSetupFuncs(c.publisherSetupFuncs(routingKey, publisher, eventsExchangeName())...)
+	c.appendSetupFuncs(func(channel amqpChannel) error {
+		return exchangeDeclare(channel, eventsExchangeName(), "topic")
+	})
+	c.appendSetupFuncs(func(channel amqpChannel) error {
+		go c.publish(channel, publisher, routingKey, eventsExchangeName())
+		return nil
+	})
 	return c
 }
 
@@ -140,8 +147,10 @@ func (c *connection) Start() (io.Closer, error) {
 	if len(c.setupErrors) > 0 {
 		return nil, joinErrors(c.setupErrors...)
 	}
-	var err error
-	c.connection, c.channel, err = connectToAmqpURL(c.config)
+
+	connection, channel, err := connectToAmqpURL(c.config)
+	c.channel = channel
+	c.connection = connection
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +158,11 @@ func (c *connection) Start() (io.Closer, error) {
 	if err := c.setup(); err != nil {
 		return nil, err
 	}
+
+	go c.handleCloseEvent()
+	channel.NotifyClose(c.closeListener)
+	connection.NotifyClose(c.closeListener)
+
 	c.started = true
 	return c, nil
 }
@@ -159,10 +173,11 @@ func (c *connection) Close() error {
 
 func newConnection(serviceName string, config AmqpConfig, errors ...error) Connection {
 	return &connection{
-		serviceName: serviceName,
-		config:      config,
-		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
-		setupErrors: errors,
+		serviceName:   serviceName,
+		config:        config,
+		handlers:      make(map[queueRoutingKey]messageHandlerInvoker),
+		setupErrors:   errors,
+		closeListener: make(chan *amqp.Error),
 	}
 }
 
@@ -173,8 +188,7 @@ func (c *connection) setup() error {
 	log.Println("setting up exchanges, queue, bindings and handlers")
 	for _, f := range c.setupFuncs {
 		if err := f(c.channel); err != nil {
-			// TODO Which function failed and why
-			return fmt.Errorf("setup function <name>?? failed %v", err)
+			return fmt.Errorf("setup function <%s> failed, %v", runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), err)
 		}
 	}
 
@@ -219,9 +233,10 @@ type connection struct {
 	connection  io.Closer
 	channel     amqpChannel
 	// Setup state
-	handlers    map[queueRoutingKey]messageHandlerInvoker
-	setupFuncs  []setupFunc
-	setupErrors []error
+	handlers      map[queueRoutingKey]messageHandlerInvoker
+	setupFuncs    []setupFunc
+	setupErrors   []error
+	closeListener chan *amqp.Error
 }
 
 var _ amqpChannel = &amqp.Channel{}
@@ -250,17 +265,6 @@ type messageHandlerInvoker struct {
 	handler          interface{}
 	responseExchange string
 	queueRoutingKey
-}
-
-func (c *connection) publisherSetupFuncs(routingKey string, publisher chan interface{}, exchangeName string) []setupFunc {
-	return []setupFunc{func(channel amqpChannel) error {
-		return exchangeDeclare(channel, exchangeName, "topic")
-	},
-		func(channel amqpChannel) error {
-			go c.publish(channel, publisher, routingKey, exchangeName)
-			return nil
-		},
-	}
 }
 
 func divertToMessageHandlers(channel amqpChannel, deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
@@ -312,8 +316,8 @@ func publishMessage(channel amqpChannel, msg interface{}, routingKey, exchangeNa
 		false,
 		publishing,
 	)
-
 }
+
 func (c *connection) publish(channel amqpChannel, p <-chan interface{}, routingKey, exchangeName string) {
 	headers := amqp.Table{}
 	headers["service"] = c.serviceName
@@ -325,7 +329,6 @@ func (c *connection) publish(channel amqpChannel, p <-chan interface{}, routingK
 	}
 }
 
-// TODO Remove duplication
 func handleRequestResponse(channel amqpChannel, d amqp.Delivery, invoker messageHandlerInvoker) {
 	handler := invoker.handler
 	message, err := parseMessage(d.Body, handler)
@@ -460,4 +463,10 @@ func joinErrors(errors ...error) error {
 		errorStrings = append(errorStrings, e.Error())
 	}
 	return fmt.Errorf("errors found during setup,\n\t%s", strings.Join(errorStrings, "\n\t"))
+}
+
+func (c *connection) handleCloseEvent() {
+	for e := range c.closeListener {
+		log.Fatalf("server connection closed, shutting down. %s", e)
+	}
 }

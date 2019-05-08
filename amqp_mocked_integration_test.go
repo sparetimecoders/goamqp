@@ -323,8 +323,8 @@ func TestAddingMessageHandlerAsRequestResponseHandler(t *testing.T) {
 
 	assert.Equal(t, 1, len(channel.BindingDeclarations))
 	assert.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
-
 }
+
 func TestRequestResponseHandler(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
