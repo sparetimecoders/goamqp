@@ -89,14 +89,15 @@ func TestEnvParse(t *testing.T) {
 	_ = os.Setenv("RABBITMQ_VHOST", "b")
 	_ = os.Setenv("RABBITMQ_USERNAME", "c")
 	_ = os.Setenv("RABBITMQ_PASSWORD", "d")
-	_ = os.Setenv("RABBITMQ_DELAYED_MESSAGING", "true")
+	_ = os.Setenv("RABBITMQ_DELAYED_MESSAGE_ENABLED", "false")
 
 	c := &AmqpConfig{}
-	_ = env.Parse(c)
-
+	err := env.Parse(c)
+	assert.NoError(t, err)
 	assert.Equal(t, "a", c.Host)
 	assert.Equal(t, 1234, c.Port)
 	assert.Equal(t, "b", c.VHost)
 	assert.Equal(t, "c", c.Username)
 	assert.Equal(t, "d", c.Password)
+	assert.False(t, c.DelayedMessage)
 }

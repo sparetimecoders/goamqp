@@ -393,7 +393,7 @@ func consume(channel amqpChannel, queue string) (<-chan amqp.Delivery, error) {
 func (c *connection) exchangeDeclare(channel amqpChannel, name, kind string) error {
 	log.Printf("creating exchange with name: %s, and kind: %s", name, kind)
 	args := amqp.Table{}
-	if c.config.DelayedMessage == nil || *c.config.DelayedMessage {
+	if c.config.DelayedMessage {
 		args["x-delayed-type"] = kind
 		kind = "x-delayed-message"
 	}

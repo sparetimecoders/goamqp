@@ -165,8 +165,7 @@ func TestCloseCallsUnderlyingCloseMethods(t *testing.T) {
 func TestDelayedMessagingDisabled(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
-	delayedMessage := false
-	c.config.DelayedMessage = &delayedMessage
+	c.config.DelayedMessage = false
 	c.AddEventStreamListener("key", &MockIncomingMessageHandler{}).(*connection).setup()
 	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
 	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{}, kind: "topic"}, channel.ExchangeDeclarations[0])
