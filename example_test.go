@@ -17,61 +17,41 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-package go_amqp_test
+package goamqp_test
 
 import (
 	"fmt"
-	"gitlab.com/sparetimecoders/go_amqp"
+	"gitlab.com/sparetimecoders/goamqp"
 	"log"
-	"math/rand"
 	"time"
 )
 
 func Example() {
 
-	config := go_amqp.Config{
-		AmqpConfig: &go_amqp.AmqpConfig{
-			Host:     "localhost",
-			Port:     5672,
-			Username: "admin",
-			Password: "password",
-			VHost:    "",
-		},
-		DelayedMessageSupported: true,
+	config := goamqp.AmqpConfig{
+		Host:     "localhost",
+		Port:     5672,
+		Username: "admin",
+		Password: "password",
+		VHost:    "",
 	}
-	connection, err := go_amqp.New(config)
-	if err != nil {
-		log.Fatalln("failed to connect", err)
-	}
-	err = connection.NewEventStreamListener("test-service", "testkey", &TestIncomingMessageHandler{})
-	if err != nil {
-		log.Fatalln("failed to create listener", err)
-	}
-	p, err := connection.NewEventStreamPublisher("testkey")
+	publisher := make(chan interface{})
+
+	connection, err := goamqp.New("service", config).
+		AddEventStreamListener("testkey", &TestIncomingMessageHandler{}).
+		AddEventStreamPublisher("testkey", publisher).
+		Start()
 	if err != nil {
 		log.Fatalln("failed to create publisher", err)
 	}
 
-	r := rand.New(rand.NewSource(99))
-	for {
-		fmt.Println("Sleep")
-		time.Sleep(2 * time.Second)
-		fmt.Println("Sending")
-
-		if r.Int()%2 == 0 {
-			p <- IncomingMessage{"FAILED"}
-		} else {
-			p <- IncomingMessage{"OK"}
-		}
-	}
+	publisher <- IncomingMessage{"FAILED"}
+	publisher <- IncomingMessage{"OK"}
+	connection.Close()
 }
 
 type TestIncomingMessageHandler struct {
 	ctx string
-}
-
-func (TestIncomingMessageHandler) Type() interface{} {
-	return IncomingMessage{}
 }
 
 func (i TestIncomingMessageHandler) Process(m IncomingMessage) bool {

@@ -17,13 +17,11 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-package go_amqp
+package goamqp
 
 import (
-	"fmt"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/go-playground/validator.v9"
 	"testing"
 	"time"
 )
@@ -88,6 +86,10 @@ type Ack struct {
 	tag      uint64
 	multiple bool
 }
+type Reject struct {
+	tag     uint64
+	requeue bool
+}
 
 type Nack struct {
 	tag      uint64
@@ -96,10 +98,19 @@ type Nack struct {
 }
 
 type MockAcknowledger struct {
-	Acks  chan Ack
-	Nacks chan Nack
+	Acks    chan Ack
+	Nacks   chan Nack
+	Rejects chan Reject
 }
 
+type MockCloser struct {
+	Called bool
+}
+
+func (c *MockCloser) Close() error {
+	c.Called = true
+	return nil
+}
 func (a *MockAcknowledger) Ack(tag uint64, multiple bool) error {
 	a.Acks <- Ack{tag, multiple}
 	return nil
@@ -109,7 +120,7 @@ func (a *MockAcknowledger) Nack(tag uint64, multiple bool, requeue bool) error {
 	return nil
 }
 func (a *MockAcknowledger) Reject(tag uint64, requeue bool) error {
-	fmt.Println("P")
+	a.Rejects <- Reject{tag, requeue}
 	return nil
 }
 
@@ -143,15 +154,21 @@ func (m *MockAmqpChannel) QueueDeclare(name string, durable, autoDelete, exclusi
 	m.QueueDeclarations = append(m.QueueDeclarations, QueueDeclaration{name, durable, autoDelete, noWait, args})
 	return amqp.Queue{}, nil
 }
+func TestCloseCallsUnderlyingCloseMethods(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(&channel)
+	closer := MockCloser{}
+	conn.connection = &closer
+	conn.Close()
+	assert.True(t, closer.Called)
+}
+
 func TestEventListenerSetup(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	c := connection{
-		connection: nil,
-		channel:    &channel,
-	}
-	c.NewEventStreamListener("svc", "key", &MockIncomingMessageHandler{})
+	c := mockConnection(&channel)
+	c.AddEventStreamListener("key", &MockIncomingMessageHandler{}).(*connection).setup()
 	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
-	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{}, kind: "topic"}, channel.ExchangeDeclarations[0])
+	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "topic"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
 
 	assert.Equal(t, 1, len(channel.QueueDeclarations))
 	assert.Equal(t, QueueDeclaration{name: "events.topic.exchange.queue.svc", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
@@ -161,19 +178,61 @@ func TestEventListenerSetup(t *testing.T) {
 
 	assert.Equal(t, 1, len(channel.Consumers))
 	assert.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
+}
 
+func TestEventListener(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+	handler := &MockIncomingMessageHandler{Received: make(chan TestMessage, 2)}
+
+	c.AddEventStreamListener("key", handler).(*connection).setup()
+	acker := NewMockAcknowledger()
+
+	delivery := amqp.Delivery{
+		RoutingKey:   "key",
+		Acknowledger: &acker,
+		Body:         []byte("{\"Msg\":\"test\",\"Success\":true}"),
+		DeliveryTag:  uint64(123),
+	}
+
+	channel.Delivery <- delivery
+	msg := <-handler.Received
+	ack := <-acker.Acks
+
+	assert.Equal(t, TestMessage{Msg: "test", Success: true}, msg)
+	assert.Equal(t, Ack{uint64(123), false}, ack)
+}
+
+func TestUnhandledEventsGetsRejected(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+	handler := &MockIncomingMessageHandler{Received: make(chan TestMessage, 2)}
+
+	c.AddEventStreamListener("key", handler).(*connection).setup()
+	acker := NewMockAcknowledger()
+
+	delivery := amqp.Delivery{
+		RoutingKey:   "keymissing",
+		Acknowledger: &acker,
+		Body:         []byte("{\"Msg\":\"test\",\"Success\":true}"),
+		DeliveryTag:  uint64(123),
+	}
+
+	channel.Delivery <- delivery
+
+	reject := <-acker.Rejects
+
+	assert.Equal(t, Reject{uint64(123), false}, reject)
 }
 
 func TestEventPublisher(t *testing.T) {
 
 	channel := NewMockAmqpChannel()
-	c := connection{
-		connection: nil,
-		channel:    &channel,
-	}
-	p, _ := c.NewEventStreamPublisher("key")
+	c := mockConnection(&channel)
+	p := make(chan interface{}, 2)
+	c.AddEventStreamPublisher("key", p).(*connection).setup()
 	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
-	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{}, kind: "topic"}, channel.ExchangeDeclarations[0])
+	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "topic"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
 
 	assert.Equal(t, 0, len(channel.QueueDeclarations))
 	assert.Equal(t, 0, len(channel.BindingDeclarations))
@@ -188,41 +247,44 @@ func TestEventPublisher(t *testing.T) {
 
 	assert.Equal(t, uint8(2), published.msg.DeliveryMode)
 	assert.Equal(t, "application/json", published.msg.ContentType)
-	assert.Equal(t, 0, len(published.msg.Headers))
+	assert.Equal(t, 1, len(published.msg.Headers))
+	assert.Equal(t, "svc", published.msg.Headers["service"])
 	assert.Equal(t, "", published.msg.ReplyTo)
 	assert.Equal(t, "{\"Msg\":\"test\",\"Success\":true}", string(published.msg.Body))
 
 	p <- DelayedTestMessage{"test"}
 	published = <-channel.Published
 
-	assert.Equal(t, 1, len(published.msg.Headers))
+	assert.Equal(t, 2, len(published.msg.Headers))
 	assert.Equal(t, "1000", published.msg.Headers["x-delay"])
+	assert.Equal(t, "svc", published.msg.Headers["service"])
 
 }
-func TestDelayedMessageExchange(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	c := connection{
-		connection: nil,
-		channel:    &channel,
-		config:     Config{DelayedMessageSupported: true},
-	}
-	c.NewEventStreamPublisher("key")
-	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
-	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "topic"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
 
-	assert.Equal(t, 0, len(channel.QueueDeclarations))
-	assert.Equal(t, 0, len(channel.BindingDeclarations))
-
-}
 func TestServicePublisher(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	c := connection{
-		connection: nil,
-		channel:    &channel,
-	}
-	p, _ := c.NewServicePublisher("svc", "key")
-	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{}, kind: "direct"}, channel.ExchangeDeclarations[0])
-	assert.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{}, kind: "headers"}, channel.ExchangeDeclarations[1])
+	c := mockConnection(&channel)
+
+	p := make(chan interface{}, 2)
+
+	c.AddServicePublisher("svc", "key", p, nil).(*connection).setup()
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+
+	p <- TestMessage{"test", true}
+	published := <-channel.Published
+	assert.Equal(t, "key", published.key)
+	assert.Equal(t, "svc.direct.exchange.request", published.exchange)
+}
+
+func TestServicePublisherWithHandler(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+
+	p := make(chan interface{}, 2)
+
+	c.AddServicePublisher("svc", "key", p, &MockIncomingMessageHandler{}).(*connection).setup()
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[1])
+	assert.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "headers"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
 
 	p <- TestMessage{"test", true}
 	published := <-channel.Published
@@ -234,27 +296,27 @@ type MockIncomingMessageHandler struct {
 	Received chan TestMessage
 }
 
-func (MockIncomingMessageHandler) Type() interface{} {
-	return TestMessage{}
-}
-
 func (m *MockIncomingMessageHandler) Process(msg TestMessage) bool {
 	m.Received <- msg
 	return msg.Success
 }
 
-func TestServiceListener(t *testing.T) {
+type MockRequestResponseHandler struct {
+	Received chan TestMessage
+}
+
+func (m *MockRequestResponseHandler) Process(msg TestMessage) (string, bool) {
+	m.Received <- msg
+	return "OK", msg.Success
+}
+
+func TestRequestResponseHandler(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	c := connection{
-		connection: nil,
-		channel:    &channel,
-		validate:   validator.New(),
-	}
-	handler := &MockIncomingMessageHandler{Received: make(chan TestMessage, 2)}
-	err := c.NewServiceListener("svc", "key", handler)
-	assert.NoError(t, err)
+	c := mockConnection(&channel)
+	handler := &MockRequestResponseHandler{Received: make(chan TestMessage, 2)}
+	c.AddRequestResponseHandler("key", handler).(*connection).setup()
 	assert.Equal(t, 2, len(channel.ExchangeDeclarations))
-	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{}, kind: "direct"}, channel.ExchangeDeclarations[0])
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
 
 	assert.Equal(t, 1, len(channel.QueueDeclarations))
 	assert.Equal(t, QueueDeclaration{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
@@ -265,6 +327,7 @@ func TestServiceListener(t *testing.T) {
 	acker := NewMockAcknowledger()
 
 	delivery := amqp.Delivery{
+		RoutingKey:   "key",
 		Acknowledger: &acker,
 		Body:         []byte("{\"Msg\":\"test\",\"Success\":true}"),
 		DeliveryTag:  uint64(123),
@@ -278,6 +341,7 @@ func TestServiceListener(t *testing.T) {
 	assert.Equal(t, uint64(123), ack.tag)
 
 	delivery = amqp.Delivery{
+		RoutingKey:   "key",
 		Acknowledger: &acker,
 		Body:         []byte("{\"Msg\":\"failed\",\"Success\":false}"),
 		DeliveryTag:  uint64(1),
@@ -302,7 +366,15 @@ func NewMockAmqpChannel() MockAmqpChannel {
 
 func NewMockAcknowledger() MockAcknowledger {
 	return MockAcknowledger{
-		Acks:  make(chan Ack, 2),
-		Nacks: make(chan Nack, 2),
+		Acks:    make(chan Ack, 2),
+		Nacks:   make(chan Nack, 2),
+		Rejects: make(chan Reject, 2),
 	}
+}
+
+func mockConnection(channel *MockAmqpChannel) *connection {
+	conn := New("svc", AmqpConfig{})
+	conn.(*connection).channel = channel
+
+	return conn.(*connection)
 }

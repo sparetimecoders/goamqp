@@ -17,5 +17,5 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// Package go_amqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
-package go_amqp
+// Package goamqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
+package goamqp

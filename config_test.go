@@ -17,7 +17,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-package go_amqp
+package goamqp
 
 import (
 	"github.com/caarlos0/env"
@@ -27,7 +27,7 @@ import (
 )
 
 func TestParseValidUrl(t *testing.T) {
-	c, err := ParseAmqpUrl("amqp://localhost:user@password:67333/a")
+	c, err := ParseAmqpURL("amqp://localhost:user@password:67333/a")
 	assert.NoError(t, err)
 	assert.EqualValues(t, AmqpConfig{
 		Username: "user",
@@ -39,7 +39,7 @@ func TestParseValidUrl(t *testing.T) {
 		c)
 }
 func TestParseValidUrlWithDefaults(t *testing.T) {
-	c, err := ParseAmqpUrl("localhost:user@password")
+	c, err := ParseAmqpURL("localhost:user@password")
 	assert.NoError(t, err)
 	assert.EqualValues(t, AmqpConfig{
 		Username: "user",
@@ -49,36 +49,36 @@ func TestParseValidUrlWithDefaults(t *testing.T) {
 		VHost:    "",
 	},
 		c)
-	assert.Equal(t, "amqp://user:password@localhost:5672/", c.AmqpUrl())
+	assert.Equal(t, "amqp://user:password@localhost:5672/", c.AmqpURL())
 }
 
 func TestParseUrlMissingHost(t *testing.T) {
-	_, err := ParseAmqpUrl("amqp://:user@password:67333/a")
+	_, err := ParseAmqpURL("amqp://:user@password:67333/a")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing host from config")
 }
 
 func TestParseUrlMissingUsername(t *testing.T) {
-	_, err := ParseAmqpUrl("amqp://localhost:@password:67333/a")
+	_, err := ParseAmqpURL("amqp://localhost:@password:67333/a")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing username from config")
 }
 
 func TestParseUrlMissingPassword(t *testing.T) {
-	_, err := ParseAmqpUrl("amqp://localhost:user@:67333/a")
+	_, err := ParseAmqpURL("amqp://localhost:user@:67333/a")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing password from config")
 }
 
 func TestParseUrlDefaultPort(t *testing.T) {
-	c, err := ParseAmqpUrl("amqp://localhost:user@password/Vhost")
+	c, err := ParseAmqpURL("amqp://localhost:user@password/Vhost")
 	assert.NoError(t, err)
 	assert.Equal(t, "Vhost", c.VHost)
 	assert.Equal(t, 5672, c.Port)
 }
 
 func TestParseUrlInvalid(t *testing.T) {
-	_, err := ParseAmqpUrl("amqp://localhost:user:67333/a")
+	_, err := ParseAmqpURL("amqp://localhost:user:67333/a")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connection url is invalid")
 }
@@ -91,10 +91,9 @@ func TestEnvParse(t *testing.T) {
 	_ = os.Setenv("RABBITMQ_PASSWORD", "d")
 	_ = os.Setenv("RABBITMQ_DELAYED_MESSAGING", "true")
 
-	c := &Config{AmqpConfig: &AmqpConfig{}}
+	c := &AmqpConfig{}
 	_ = env.Parse(c)
 
-	assert.Equal(t, true, c.DelayedMessageSupported)
 	assert.Equal(t, "a", c.Host)
 	assert.Equal(t, 1234, c.Port)
 	assert.Equal(t, "b", c.VHost)
