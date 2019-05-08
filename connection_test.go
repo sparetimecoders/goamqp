@@ -17,7 +17,7 @@ func TestAddRequestResponseHandlerError(t *testing.T) {
 		AddEventStreamListener("key", &TestIncomingMessageHandler{}).(*connection).setup()
 	assert.Error(t, err)
 	assert.Len(t, strings.Split(err.Error(), "\n"), 5)
-	assert.Contains(t, err.Error(), "handler goamqp.incorrectRequestResponseMessageHandler has incorrect number of return values. Expected 2, actual 0")
+	assert.Contains(t, err.Error(), "handler goamqp.incorrectRequestResponseMessageHandler has incorrect number of return values. Expected 1, actual 0")
 	assert.Contains(t, err.Error(), "routingkey key for queue events.topic.exchange.queue.svc already assigned to handler goamqp.TestIncomingMessageHandler, cannot assign goamqp.TestIncomingMessageHandler")
 	assert.Contains(t, err.Error(), "routingkey key for queue svc.direct.exchange.request.queue already assigned to handler goamqp.RequestResponseMessageHandler, cannot assign goamqp.RequestResponseMessageHandler")
 	assert.Contains(t, err.Error(), "handler goamqp.incorrectProcessArgumentCount has incorrect number of arguments, expected 1 but was 0")

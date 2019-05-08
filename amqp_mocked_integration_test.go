@@ -310,13 +310,29 @@ func (m *MockRequestResponseHandler) Process(msg TestMessage) (string, bool) {
 	return "OK", msg.Success
 }
 
+func TestAddingMessageHandlerAsRequestResponseHandler(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+	handler := &MockIncomingMessageHandler{Received: make(chan TestMessage, 2)}
+	c.AddRequestResponseHandler("key", handler).(*connection).setup()
+	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+
+	assert.Equal(t, 1, len(channel.QueueDeclarations))
+	assert.Equal(t, QueueDeclaration{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
+
+	assert.Equal(t, 1, len(channel.BindingDeclarations))
+	assert.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
+
+}
 func TestRequestResponseHandler(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
 	handler := &MockRequestResponseHandler{Received: make(chan TestMessage, 2)}
 	c.AddRequestResponseHandler("key", handler).(*connection).setup()
 	assert.Equal(t, 2, len(channel.ExchangeDeclarations))
-	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+	assert.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "headers"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[1])
 
 	assert.Equal(t, 1, len(channel.QueueDeclarations))
 	assert.Equal(t, QueueDeclaration{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])

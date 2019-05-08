@@ -102,7 +102,21 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 func (c *connection) AddRequestResponseHandler(routingKey string, handler interface{}) Connection {
 	reqExchangeName := serviceRequestExchangeName(c.serviceName)
 	reqQueueName := serviceRequestQueueName(c.serviceName)
-	c.addRequestResponseHandler(reqQueueName, routingKey, handler)
+	err := checkRequestResponseHandlerReturns(handler)
+
+	if err != nil {
+		log.Println("passed handler is not a request response handler, trying to add it as message handler")
+		c.addHandler(reqQueueName, routingKey, handler)
+	} else {
+		resExchangeName := serviceResponseExchangeName(c.serviceName)
+		c.tryAddHandler(reqQueueName, routingKey, resExchangeName, handler)
+
+		c.appendSetupFuncs(
+			func(channel amqpChannel) error {
+				return exchangeDeclare(channel, resExchangeName, "headers")
+			},
+		)
+	}
 
 	c.appendSetupFuncs(
 		func(channel amqpChannel) error {
@@ -113,14 +127,6 @@ func (c *connection) AddRequestResponseHandler(routingKey string, handler interf
 		},
 		func(channel amqpChannel) error {
 			return bindQueueToExchange(channel, reqExchangeName, reqQueueName, routingKey, amqp.Table{})
-		},
-	)
-
-	resExchangeName := serviceResponseExchangeName(c.serviceName)
-
-	c.appendSetupFuncs(
-		func(channel amqpChannel) error {
-			return exchangeDeclare(channel, resExchangeName, "headers")
 		},
 	)
 
@@ -422,23 +428,11 @@ func (c *connection) addHandler(queueName, routingKey string, handler interface{
 		c.addError(err)
 		return
 	}
-	uniqueKey := queueRoutingKey{queue: queueName, routingKey: routingKey}
-	handlerType := reflect.TypeOf(handler).Elem()
-	if existing, exist := c.handlers[uniqueKey]; exist {
-		existingType := reflect.TypeOf(existing.handler).Elem()
-		c.addError(fmt.Errorf("routingkey %s for queue %s already assigned to handler %s, cannot assign %s", routingKey, queueName, existingType, handlerType))
-		return
-	}
-	log.Printf("routingkey %s for queue %s assigned to handler %s", routingKey, queueName, handlerType)
-	c.handlers[uniqueKey] = messageHandlerInvoker{handler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}}
+	c.tryAddHandler(queueName, routingKey, "", handler)
+
 }
 
-func (c *connection) addRequestResponseHandler(queueName, routingKey string, handler interface{}) {
-	err := checkRequestResponseHandlerReturns(handler)
-	if err != nil {
-		c.addError(err)
-		return
-	}
+func (c *connection) tryAddHandler(queueName, routingKey, serviceResponseExchangeName string, handler interface{}) {
 	uniqueKey := queueRoutingKey{queue: queueName, routingKey: routingKey}
 	handlerType := reflect.TypeOf(handler).Elem()
 	if existing, exist := c.handlers[uniqueKey]; exist {
@@ -447,8 +441,7 @@ func (c *connection) addRequestResponseHandler(queueName, routingKey string, han
 		return
 	}
 	log.Printf("routingkey %s for queue %s assigned to handler %s", routingKey, queueName, handlerType)
-
-	c.handlers[uniqueKey] = messageHandlerInvoker{handler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, responseExchange: serviceResponseExchangeName(c.serviceName)}
+	c.handlers[uniqueKey] = messageHandlerInvoker{handler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, responseExchange: serviceResponseExchangeName}
 }
 
 type setupFunc func(channel amqpChannel) error
