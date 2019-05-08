@@ -29,11 +29,12 @@ import (
 
 // AmqpConfig contains the necessary variables for connecting to RabbitMQ.
 type AmqpConfig struct {
-	Username string `env:"RABBITMQ_USERNAME,required"`
-	Password string `env:"RABBITMQ_PASSWORD,required"`
-	Host     string `env:"RABBITMQ_HOST,required"`
-	Port     int    `env:"RABBITMQ_PORT" envDefault:"5672"`
-	VHost    string `env:"RABBITMQ_VHOST" envDefault:""`
+	Username       string `env:"RABBITMQ_USERNAME,required"`
+	Password       string `env:"RABBITMQ_PASSWORD,required"`
+	Host           string `env:"RABBITMQ_HOST,required"`
+	Port           int    `env:"RABBITMQ_PORT" envDefault:"5672"`
+	VHost          string `env:"RABBITMQ_VHOST" envDefault:""`
+	DelayedMessage *bool  `env:"RABBITMQ_DELAYED_MESSAGED" envDefault:"true"`
 }
 
 // ParseAmqpURL tries to parse the passed string and create a valid AmqpConfig object

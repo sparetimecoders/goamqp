@@ -42,7 +42,7 @@ func New(serviceName string, config AmqpConfig) Connection {
 
 func (c *connection) AddEventStreamPublisher(routingKey string, publisher chan interface{}) Connection {
 	c.appendSetupFuncs(func(channel amqpChannel) error {
-		return exchangeDeclare(channel, eventsExchangeName(), "topic")
+		return c.exchangeDeclare(channel, eventsExchangeName(), "topic")
 	})
 	c.appendSetupFuncs(func(channel amqpChannel) error {
 		go c.publish(channel, publisher, routingKey, eventsExchangeName())
@@ -58,7 +58,7 @@ func (c *connection) AddEventStreamListener(routingKey string, handler interface
 
 	c.appendSetupFuncs(
 		func(channel amqpChannel) error {
-			return exchangeDeclare(channel, exchangeName, "topic")
+			return c.exchangeDeclare(channel, exchangeName, "topic")
 		},
 		func(channel amqpChannel) error {
 			return queueDeclare(channel, queueName)
@@ -76,7 +76,7 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 		resExchangeName := serviceResponseExchangeName(targetService)
 		c.addHandler(resQueueName, routingKey, handler)
 		c.appendSetupFuncs(func(channel amqpChannel) error {
-			return exchangeDeclare(channel, resExchangeName, "headers")
+			return c.exchangeDeclare(channel, resExchangeName, "headers")
 		},
 			func(channel amqpChannel) error {
 				return queueDeclare(channel, resQueueName)
@@ -95,7 +95,7 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 
 	c.appendSetupFuncs(
 		func(channel amqpChannel) error {
-			return exchangeDeclare(channel, reqExchangeName, "direct")
+			return c.exchangeDeclare(channel, reqExchangeName, "direct")
 		},
 		func(channel amqpChannel) error {
 			go c.publish(channel, publisher, routingKey, reqExchangeName)
@@ -120,14 +120,14 @@ func (c *connection) AddRequestResponseHandler(routingKey string, handler interf
 
 		c.appendSetupFuncs(
 			func(channel amqpChannel) error {
-				return exchangeDeclare(channel, resExchangeName, "headers")
+				return c.exchangeDeclare(channel, resExchangeName, "headers")
 			},
 		)
 	}
 
 	c.appendSetupFuncs(
 		func(channel amqpChannel) error {
-			return exchangeDeclare(channel, reqExchangeName, "direct")
+			return c.exchangeDeclare(channel, reqExchangeName, "direct")
 		},
 		func(channel amqpChannel) error {
 			return queueDeclare(channel, reqQueueName)
@@ -390,11 +390,13 @@ func consume(channel amqpChannel, queue string) (<-chan amqp.Delivery, error) {
 	)
 }
 
-func exchangeDeclare(channel amqpChannel, name, kind string) error {
+func (c *connection) exchangeDeclare(channel amqpChannel, name, kind string) error {
 	log.Printf("creating exchange with name: %s, and kind: %s", name, kind)
 	args := amqp.Table{}
-	args["x-delayed-type"] = kind
-	kind = "x-delayed-message"
+	if c.config.DelayedMessage == nil || *c.config.DelayedMessage {
+		args["x-delayed-type"] = kind
+		kind = "x-delayed-message"
+	}
 
 	return channel.ExchangeDeclare(
 		name,
