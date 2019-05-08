@@ -17,10 +17,9 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-package go_amqp
+package goamqp
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -28,7 +27,7 @@ import (
 	"strings"
 )
 
-// A Config that contains the necessary variables for connecting to RabbitMQ.
+// AmqpConfig contains the necessary variables for connecting to RabbitMQ.
 type AmqpConfig struct {
 	Username string `env:"RABBITMQ_USERNAME,required"`
 	Password string `env:"RABBITMQ_PASSWORD,required"`
@@ -37,18 +36,17 @@ type AmqpConfig struct {
 	VHost    string `env:"RABBITMQ_VHOST" envDefault:""`
 }
 
-// ParseAmqpUrl tries to parse the passed string and create a valic AmqpConfig object
-func ParseAmqpUrl(amqpUrl string) (AmqpConfig, error) {
+// ParseAmqpURL tries to parse the passed string and create a valid AmqpConfig object
+func ParseAmqpURL(amqpURL string) (AmqpConfig, error) {
 	var amqpConnectionRegex = regexp.MustCompile(`(?:amqp:\/\/)?(?P<Host>.*):(?P<Username>.*)@(?P<Password>.*?)(?:\:(?P<Port>\d*))?(?:\/(?P<VHost>.*))?$`)
-	if amqpConnectionRegex.MatchString(amqpUrl) {
-		return validateConfig(*convertToAmqpConfig(mapValues(amqpConnectionRegex, amqpConnectionRegex.FindStringSubmatch(amqpUrl))))
-	} else {
-		return AmqpConfig{}, errors.New(fmt.Sprintf("connection url is invalid, %s", amqpUrl))
+	if amqpConnectionRegex.MatchString(amqpURL) {
+		return validateConfig(*convertToAmqpConfig(mapValues(amqpConnectionRegex, amqpConnectionRegex.FindStringSubmatch(amqpURL))))
 	}
+	return AmqpConfig{}, fmt.Errorf("connection url is invalid, %s", amqpURL)
 }
 
-// AmqpUrl returns a valid connection url
-func (c AmqpConfig) AmqpUrl() string {
+// AmqpURL returns a valid connection url
+func (c AmqpConfig) AmqpURL() string {
 	return fmt.Sprintf("amqp://%s:%s@%s:%d/%s", c.Username, c.Password, c.Host, c.Port, c.VHost)
 }
 
@@ -81,15 +79,15 @@ func mapValues(amqpConnectionRegex *regexp.Regexp, groups []string) map[string]s
 
 func validateConfig(c AmqpConfig) (AmqpConfig, error) {
 	if strings.TrimSpace(c.Password) == "" {
-		return c, errors.New(fmt.Sprintf("missing password from config %s", c))
+		return c, fmt.Errorf("missing password from config %s", c)
 	}
 
 	if strings.TrimSpace(c.Host) == "" {
-		return c, errors.New(fmt.Sprintf("missing host from config %s", c))
+		return c, fmt.Errorf("missing host from config %s", c)
 	}
 
 	if strings.TrimSpace(c.Username) == "" {
-		return c, errors.New(fmt.Sprintf("missing username from config %s", c))
+		return c, fmt.Errorf("missing username from config %s", c)
 	}
 	if c.Port == 0 {
 		c.Port = 5672
