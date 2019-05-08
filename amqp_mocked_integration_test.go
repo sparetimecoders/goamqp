@@ -397,7 +397,7 @@ func NewMockAcknowledger() MockAcknowledger {
 }
 
 func mockConnection(channel *MockAmqpChannel) *connection {
-	conn := New("svc", AmqpConfig{})
+	conn := New("svc", AmqpConfig{DelayedMessage: true})
 	conn.(*connection).channel = channel
 
 	return conn.(*connection)
