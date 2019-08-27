@@ -34,9 +34,8 @@ func NewFromURL(serviceName string, amqpURL string) Connection {
 	amqpConfig, err := ParseAmqpURL(amqpURL)
 	if err != nil {
     return newConnection(serviceName, amqpConfig, err)
-  } else {
-    return newConnection(serviceName, amqpConfig)
   }
+  return newConnection(serviceName, amqpConfig)
 }
 
 // New creates a new Connection from config
