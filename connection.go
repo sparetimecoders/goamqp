@@ -32,7 +32,10 @@ type Connection interface {
 // NewFromURL creates a new Connection from an URL
 func NewFromURL(serviceName string, amqpURL string) Connection {
 	amqpConfig, err := ParseAmqpURL(amqpURL)
-	return newConnection(serviceName, amqpConfig, err)
+	if err != nil {
+    return newConnection(serviceName, amqpConfig, err)
+  }
+  return newConnection(serviceName, amqpConfig)
 }
 
 // New creates a new Connection from config
