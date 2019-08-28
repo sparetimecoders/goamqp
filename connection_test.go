@@ -30,16 +30,16 @@ func TestFailingSetupFunc(t *testing.T) {
 }
 
 func TestNewFromURL_InvalidURL(t *testing.T) {
-  c := NewFromURL("test", "amqp://")
-  assert.NotNil(t, c)
-  assert.Equal(t, 1, len(c.(*connection).setupErrors))
-  assert.EqualError(t, c.(*connection).setupErrors[0], "connection url is invalid, amqp://")
+	c := NewFromURL("test", "amqp://")
+	assert.NotNil(t, c)
+	assert.Equal(t, 1, len(c.(*connection).setupErrors))
+	assert.EqualError(t, c.(*connection).setupErrors[0], "connection url is invalid, amqp://")
 }
 
 func TestNewFromURL_ValidURL(t *testing.T) {
-  c := NewFromURL("test", "amqp://user:password@localhost:5672/")
-  assert.NotNil(t, c)
-  assert.Equal(t, 0, len(c.(*connection).setupErrors))
+	c := NewFromURL("test", "amqp://user:password@localhost:5672/")
+	assert.NotNil(t, c)
+	assert.Equal(t, 0, len(c.(*connection).setupErrors))
 }
 
 type TestIncomingMessageHandler struct{}

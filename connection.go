@@ -33,9 +33,9 @@ type Connection interface {
 func NewFromURL(serviceName string, amqpURL string) Connection {
 	amqpConfig, err := ParseAmqpURL(amqpURL)
 	if err != nil {
-    return newConnection(serviceName, amqpConfig, err)
-  }
-  return newConnection(serviceName, amqpConfig)
+		return newConnection(serviceName, amqpConfig, err)
+	}
+	return newConnection(serviceName, amqpConfig)
 }
 
 // New creates a new Connection from config
@@ -163,8 +163,8 @@ func (c *connection) Start() (io.Closer, error) {
 	}
 
 	go c.handleCloseEvent()
-	channel.NotifyClose(c.closeListener)
-	connection.NotifyClose(c.closeListener)
+	channel.NotifyClose(c.channelCloseListener)
+	connection.NotifyClose(c.connectionCloseListener)
 
 	c.started = true
 	return c, nil
@@ -176,11 +176,12 @@ func (c *connection) Close() error {
 
 func newConnection(serviceName string, config AmqpConfig, errors ...error) Connection {
 	return &connection{
-		serviceName:   serviceName,
-		config:        config,
-		handlers:      make(map[queueRoutingKey]messageHandlerInvoker),
-		setupErrors:   errors,
-		closeListener: make(chan *amqp.Error),
+		serviceName:             serviceName,
+		config:                  config,
+		handlers:                make(map[queueRoutingKey]messageHandlerInvoker),
+		setupErrors:             errors,
+		connectionCloseListener: make(chan *amqp.Error),
+		channelCloseListener:    make(chan *amqp.Error),
 	}
 }
 
@@ -230,16 +231,16 @@ var deleteQueueAfter = 5 * 24 * time.Hour
 
 // Internal state
 type connection struct {
-	started     bool
-	serviceName string
-	config      AmqpConfig
-	connection  io.Closer
-	channel     amqpChannel
-	// Setup state
-	handlers      map[queueRoutingKey]messageHandlerInvoker
-	setupFuncs    []setupFunc
-	setupErrors   []error
-	closeListener chan *amqp.Error
+	started                 bool
+	serviceName             string
+	config                  AmqpConfig
+	connection              io.Closer
+	channel                 amqpChannel
+	handlers                map[queueRoutingKey]messageHandlerInvoker
+	setupFuncs              []setupFunc
+	setupErrors             []error
+	connectionCloseListener chan *amqp.Error
+	channelCloseListener    chan *amqp.Error
 }
 
 var _ amqpChannel = &amqp.Channel{}
@@ -471,7 +472,16 @@ func joinErrors(errors ...error) error {
 }
 
 func (c *connection) handleCloseEvent() {
-	for e := range c.closeListener {
-		log.Fatalf("server connection closed, shutting down. %s", e)
+	for {
+		select {
+		case e, ok := <-c.connectionCloseListener:
+			if ok {
+				fmt.Printf("Connection closed %+v \n", e)
+			}
+		case e, ok := <-c.channelCloseListener:
+			if ok {
+				fmt.Printf("Channel closed %+v \n", e)
+			}
+		}
 	}
 }
