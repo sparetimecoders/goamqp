@@ -132,6 +132,16 @@ type MockAmqpChannel struct {
 	Consumers            []Consumer
 	Published            chan Publish
 	Delivery             chan amqp.Delivery
+	Confirms             *chan amqp.Confirmation
+}
+
+func (m *MockAmqpChannel) NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation {
+	m.Confirms = &confirm
+	return confirm
+}
+
+func (m *MockAmqpChannel) Confirm(noWait bool) error {
+	return nil
 }
 
 func (m *MockAmqpChannel) QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error {
@@ -149,6 +159,12 @@ func (m *MockAmqpChannel) ExchangeDeclare(name, kind string, durable, autoDelete
 }
 func (m *MockAmqpChannel) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	m.Published <- Publish{exchange, key, mandatory, immediate, msg}
+	if m.Confirms != nil {
+		*m.Confirms <- amqp.Confirmation{
+			DeliveryTag: 1,
+			Ack:         true,
+		}
+	}
 	return nil
 }
 func (m *MockAmqpChannel) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
@@ -427,7 +443,28 @@ func TestRequestResponseHandler(t *testing.T) {
 	assert.Equal(t, false, nack.multiple)
 	assert.Equal(t, true, nack.requeue)
 	assert.Equal(t, uint64(1), nack.tag)
+}
 
+func TestDeliveryConfirmation(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+	publisher := make(chan interface{})
+	confirm := make(chan amqp.Confirmation, 10)
+
+	err := c.
+		AddEventStreamPublisher("key", publisher).
+		AddPublishNotify(confirm).
+	(*connection).setup()
+	assert.NoError(t, err)
+
+	_, err = c.Start()
+
+	assert.NoError(t, err)
+
+	publisher <- &IncomingMessage{URL: "http://example.com"}
+
+	confirmed := <-confirm
+	assert.NotNil(t, confirmed)
 }
 
 func NewMockAmqpChannel() MockAmqpChannel {
