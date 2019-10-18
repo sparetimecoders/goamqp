@@ -22,6 +22,7 @@ package goamqp
 import (
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -211,6 +212,45 @@ func TestEventListener(t *testing.T) {
 	assert.Equal(t, Ack{uint64(123), false}, ack)
 }
 
+func TestEventListener_MultiType(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+	handler := &MultiTypeMockMessageHandler{Received: make(chan interface{}, 2)}
+
+	c.
+		AddEventStreamListener("key", handler, reflect.TypeOf(TestMessage{})).
+		AddEventStreamListener("other", handler, reflect.TypeOf(DelayedTestMessage{})).(*connection).setup()
+	acker := NewMockAcknowledger()
+
+	delivery := amqp.Delivery{
+		RoutingKey:   "other",
+		Acknowledger: &acker,
+		Body:         []byte("{\"Msg\":\"test\",\"Success\":true}"),
+		DeliveryTag:  uint64(123),
+	}
+
+	channel.Delivery <- delivery
+	msg := <-handler.Received
+	ack := <-acker.Acks
+
+	assert.Equal(t, DelayedTestMessage{Msg: "test"}, msg)
+	assert.Equal(t, Ack{uint64(123), false}, ack)
+
+	delivery = amqp.Delivery{
+		RoutingKey:   "key",
+		Acknowledger: &acker,
+		Body:         []byte("{\"Msg\":\"test\",\"Success\":true}"),
+		DeliveryTag:  uint64(123),
+	}
+
+	channel.Delivery <- delivery
+	msg = <-handler.Received
+	ack = <-acker.Acks
+
+	assert.Equal(t, TestMessage{Msg: "test", Success: true}, msg)
+	assert.Equal(t, Ack{uint64(123), false}, ack)
+}
+
 func TestUnhandledEventsGetsRejected(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
@@ -307,6 +347,15 @@ type MockIncomingMessageHandler struct {
 func (m *MockIncomingMessageHandler) Process(msg TestMessage) bool {
 	m.Received <- msg
 	return msg.Success
+}
+
+type MultiTypeMockMessageHandler struct {
+	Received chan interface{}
+}
+
+func (x *MultiTypeMockMessageHandler) Process(msg interface{}) bool {
+	x.Received <- msg
+	return true
 }
 
 type MockRequestResponseHandler struct {

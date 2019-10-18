@@ -2,6 +2,7 @@ package goamqp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/streadway/amqp"
 	"io"
@@ -23,9 +24,9 @@ type DelayedMessage interface {
 // Connection is used to setup new listeners and publishers.
 type Connection interface {
 	AddEventStreamPublisher(routingKey string, publisher chan interface{}) Connection
-	AddEventStreamListener(routingKey string, handler interface{}) Connection
-	AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler interface{}) Connection
-	AddRequestResponseHandler(routingKey string, handler interface{}) Connection
+	AddEventStreamListener(routingKey string, handler interface{}, eventType ...reflect.Type) Connection
+	AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler interface{}, eventTypes ...reflect.Type) Connection
+	AddRequestResponseHandler(routingKey string, handler interface{}, eventTypes ...reflect.Type) Connection
 	Start() (io.Closer, error)
 }
 
@@ -54,42 +55,58 @@ func (c *connection) AddEventStreamPublisher(routingKey string, publisher chan i
 	return c
 }
 
-func (c *connection) AddEventStreamListener(routingKey string, handler interface{}) Connection {
-	queueName := serviceEventQueueName(c.serviceName)
-	exchangeName := eventsExchangeName()
-	c.addHandler(queueName, routingKey, handler)
+func (c *connection) AddEventStreamListener(routingKey string, handler interface{}, eventTypes ...reflect.Type) Connection {
+	if len(eventTypes) > 1 {
+		c.addError(errors.New("more than one type provided"))
+	} else {
+		var eventType reflect.Type
+		if len(eventTypes) == 1 {
+			eventType = eventTypes[0]
+		}
+		queueName := serviceEventQueueName(c.serviceName)
+		exchangeName := eventsExchangeName()
+		c.addHandler(queueName, routingKey, handler, eventType)
 
-	c.appendSetupFuncs(
-		func(channel amqpChannel) error {
-			return c.exchangeDeclare(channel, exchangeName, "topic")
-		},
-		func(channel amqpChannel) error {
-			return queueDeclare(channel, queueName)
-		},
-		func(channel amqpChannel) error {
-			return bindQueueToExchange(channel, exchangeName, queueName, routingKey, amqp.Table{})
-		},
-	)
+		c.appendSetupFuncs(
+			func(channel amqpChannel) error {
+				return c.exchangeDeclare(channel, exchangeName, "topic")
+			},
+			func(channel amqpChannel) error {
+				return queueDeclare(channel, queueName)
+			},
+			func(channel amqpChannel) error {
+				return bindQueueToExchange(channel, exchangeName, queueName, routingKey, amqp.Table{})
+			},
+		)
+	}
 	return c
 }
 
-func (c *connection) AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler interface{}) Connection {
+func (c *connection) AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler interface{}, eventTypes ...reflect.Type) Connection {
 	if handler != nil {
-		resQueueName := serviceResponseQueueName(targetService, c.serviceName)
-		resExchangeName := serviceResponseExchangeName(targetService)
-		c.addHandler(resQueueName, routingKey, handler)
-		c.appendSetupFuncs(func(channel amqpChannel) error {
-			return c.exchangeDeclare(channel, resExchangeName, "headers")
-		},
-			func(channel amqpChannel) error {
-				return queueDeclare(channel, resQueueName)
+		if len(eventTypes) > 1 {
+			c.addError(errors.New("more than one type provided"))
+		} else {
+			var eventType reflect.Type
+			if len(eventTypes) == 1 {
+				eventType = eventTypes[0]
+			}
+			resQueueName := serviceResponseQueueName(targetService, c.serviceName)
+			resExchangeName := serviceResponseExchangeName(targetService)
+			c.addHandler(resQueueName, routingKey, handler, eventType)
+			c.appendSetupFuncs(func(channel amqpChannel) error {
+				return c.exchangeDeclare(channel, resExchangeName, "headers")
 			},
-			func(channel amqpChannel) error {
-				headers := amqp.Table{}
-				headers["x-match"] = "all"
-				return bindQueueToExchange(channel, resExchangeName, resQueueName, routingKey, headers)
-			},
-		)
+				func(channel amqpChannel) error {
+					return queueDeclare(channel, resQueueName)
+				},
+				func(channel amqpChannel) error {
+					headers := amqp.Table{}
+					headers["x-match"] = "all"
+					return bindQueueToExchange(channel, resExchangeName, resQueueName, routingKey, headers)
+				},
+			)
+		}
 	} else {
 		log.Printf("handler is nil for service %s, will not setup response listener for target service %s", c.serviceName, targetService)
 	}
@@ -109,37 +126,44 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 	return c
 }
 
-func (c *connection) AddRequestResponseHandler(routingKey string, handler interface{}) Connection {
-	reqExchangeName := serviceRequestExchangeName(c.serviceName)
-	reqQueueName := serviceRequestQueueName(c.serviceName)
-	err := checkRequestResponseHandlerReturns(handler)
-
-	if err != nil {
-		log.Println("passed handler is not a request response handler, trying to add it as message handler")
-		c.addHandler(reqQueueName, routingKey, handler)
+func (c *connection) AddRequestResponseHandler(routingKey string, handler interface{}, eventTypes ...reflect.Type) Connection {
+	if len(eventTypes) > 1 {
+		c.addError(errors.New("more than one type provided"))
 	} else {
-		resExchangeName := serviceResponseExchangeName(c.serviceName)
-		c.tryAddHandler(reqQueueName, routingKey, resExchangeName, handler)
+		var eventType reflect.Type
+		if len(eventTypes) == 1 {
+			eventType = eventTypes[0]
+		}
+		reqExchangeName := serviceRequestExchangeName(c.serviceName)
+		reqQueueName := serviceRequestQueueName(c.serviceName)
+		err := checkRequestResponseHandlerReturns(handler)
+
+		if err != nil {
+			log.Println("passed handler is not a request response handler, trying to add it as message handler")
+			c.addHandler(reqQueueName, routingKey, handler, eventType)
+		} else {
+			resExchangeName := serviceResponseExchangeName(c.serviceName)
+			c.tryAddHandler(reqQueueName, routingKey, resExchangeName, handler, eventType)
+
+			c.appendSetupFuncs(
+				func(channel amqpChannel) error {
+					return c.exchangeDeclare(channel, resExchangeName, "headers")
+				},
+			)
+		}
 
 		c.appendSetupFuncs(
 			func(channel amqpChannel) error {
-				return c.exchangeDeclare(channel, resExchangeName, "headers")
+				return c.exchangeDeclare(channel, reqExchangeName, "direct")
+			},
+			func(channel amqpChannel) error {
+				return queueDeclare(channel, reqQueueName)
+			},
+			func(channel amqpChannel) error {
+				return bindQueueToExchange(channel, reqExchangeName, reqQueueName, routingKey, amqp.Table{})
 			},
 		)
 	}
-
-	c.appendSetupFuncs(
-		func(channel amqpChannel) error {
-			return c.exchangeDeclare(channel, reqExchangeName, "direct")
-		},
-		func(channel amqpChannel) error {
-			return queueDeclare(channel, reqQueueName)
-		},
-		func(channel amqpChannel) error {
-			return bindQueueToExchange(channel, reqExchangeName, reqQueueName, routingKey, amqp.Table{})
-		},
-	)
-
 	return c
 }
 
@@ -257,6 +281,7 @@ func connectToAmqpURL(config AmqpConfig) (*amqp.Connection, *amqp.Channel, error
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return conn, ch, nil
 }
 
@@ -269,6 +294,7 @@ type messageHandlerInvoker struct {
 	handler          interface{}
 	responseExchange string
 	queueRoutingKey
+	eventType reflect.Type
 }
 
 func divertToMessageHandlers(channel amqpChannel, deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
@@ -277,7 +303,7 @@ func divertToMessageHandlers(channel amqpChannel, deliveries <-chan amqp.Deliver
 			if h.responseExchange != "" {
 				handleRequestResponse(channel, d, h)
 			} else {
-				handleMessage(d, h.handler)
+				handleMessage(d, h.handler, h.eventType)
 			}
 		} else {
 			// Unhandled message
@@ -285,12 +311,15 @@ func divertToMessageHandlers(channel amqpChannel, deliveries <-chan amqp.Deliver
 			d.Reject(false)
 		}
 	}
-
 }
 
-func parseMessage(jsonContent []byte, handler interface{}) (interface{}, error) {
-	inputType := inputType(handler)
-	target := reflect.New(inputType).Interface()
+func parseMessage(jsonContent []byte, handler interface{}, eventType reflect.Type) (interface{}, error) {
+	var target interface{}
+	if eventType == nil {
+		target = reflect.New(inputType(handler)).Interface()
+	} else {
+		target = reflect.New(eventType).Interface()
+	}
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
 		return target, err
 	}
@@ -335,7 +364,7 @@ func (c *connection) publish(channel amqpChannel, p <-chan interface{}, routingK
 
 func handleRequestResponse(channel amqpChannel, d amqp.Delivery, invoker messageHandlerInvoker) {
 	handler := invoker.handler
-	message, err := parseMessage(d.Body, handler)
+	message, err := parseMessage(d.Body, handler, invoker.eventType)
 	if err != nil {
 		log.Printf("failed to handle message - will drop it, %v", err)
 		d.Reject(false)
@@ -360,8 +389,8 @@ func handleRequestResponse(channel amqpChannel, d amqp.Delivery, invoker message
 
 }
 
-func handleMessage(d amqp.Delivery, handler interface{}) {
-	message, err := parseMessage(d.Body, handler)
+func handleMessage(d amqp.Delivery, handler interface{}, eventType reflect.Type) {
+	message, err := parseMessage(d.Body, handler, eventType)
 	if err != nil {
 		log.Printf("failed to handle message - will drop it, %v", err)
 		d.Reject(false)
@@ -431,17 +460,17 @@ func bindQueueToExchange(channel amqpChannel, exchangeName, queueName, routingKe
 	return channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
 }
 
-func (c *connection) addHandler(queueName, routingKey string, handler interface{}) {
+func (c *connection) addHandler(queueName, routingKey string, handler interface{}, eventType reflect.Type) {
 	err := checkMessageHandler(handler)
 	if err != nil {
 		c.addError(err)
 		return
 	}
-	c.tryAddHandler(queueName, routingKey, "", handler)
+	c.tryAddHandler(queueName, routingKey, "", handler, eventType)
 
 }
 
-func (c *connection) tryAddHandler(queueName, routingKey, serviceResponseExchangeName string, handler interface{}) {
+func (c *connection) tryAddHandler(queueName, routingKey, serviceResponseExchangeName string, handler interface{}, eventType reflect.Type) {
 	uniqueKey := queueRoutingKey{queue: queueName, routingKey: routingKey}
 	handlerType := reflect.TypeOf(handler).Elem()
 	if existing, exist := c.handlers[uniqueKey]; exist {
@@ -450,7 +479,7 @@ func (c *connection) tryAddHandler(queueName, routingKey, serviceResponseExchang
 		return
 	}
 	log.Printf("routingkey %s for queue %s assigned to handler %s", routingKey, queueName, handlerType)
-	c.handlers[uniqueKey] = messageHandlerInvoker{handler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, responseExchange: serviceResponseExchangeName}
+	c.handlers[uniqueKey] = messageHandlerInvoker{handler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, responseExchange: serviceResponseExchangeName, eventType: eventType}
 }
 
 type setupFunc func(channel amqpChannel) error
