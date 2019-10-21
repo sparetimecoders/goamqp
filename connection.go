@@ -57,7 +57,7 @@ func (c *connection) AddEventStreamPublisher(routingKey string, publisher chan i
 func (c *connection) AddEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Connection {
 	queueName := serviceEventQueueName(c.serviceName)
 	exchangeName := eventsExchangeName()
-	c.addMsgHandler(queueName, routingKey, "", handler, eventType)
+	c.addMsgHandler(queueName, routingKey, handler, eventType)
 
 	c.appendSetupFuncs(
 		func(channel amqpChannel) error {
@@ -77,7 +77,7 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 	if handler != nil {
 		resQueueName := serviceResponseQueueName(targetService, c.serviceName)
 		resExchangeName := serviceResponseExchangeName(targetService)
-		c.addMsgHandler(resQueueName, routingKey, resExchangeName, handler, eventType)
+		c.addMsgHandler(resQueueName, routingKey, handler, eventType)
 		c.appendSetupFuncs(func(channel amqpChannel) error {
 			return c.exchangeDeclare(channel, resExchangeName, "headers")
 		},
@@ -415,14 +415,14 @@ func bindQueueToExchange(channel amqpChannel, exchangeName, queueName, routingKe
 	return channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
 }
 
-func (c *connection) addMsgHandler(queueName, routingKey, serviceResponseExchangeName string, handler func(interface{}) bool, eventType reflect.Type) {
+func (c *connection) addMsgHandler(queueName, routingKey string, handler func(interface{}) bool, eventType reflect.Type) {
 	uniqueKey := queueRoutingKey{queue: queueName, routingKey: routingKey}
 	if existing, exist := c.handlers[uniqueKey]; exist {
 		c.addError(fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s", routingKey, queueName, existing.eventType, eventType))
 		return
 	}
 	log.Printf("routingkey %s for queue %s assigned to handler for type %s", routingKey, queueName, eventType)
-	c.handlers[uniqueKey] = messageHandlerInvoker{msgHandler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, responseExchange: serviceResponseExchangeName, eventType: eventType}
+	c.handlers[uniqueKey] = messageHandlerInvoker{msgHandler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, eventType: eventType}
 }
 
 func (c *connection) addResponseHandler(queueName, routingKey, serviceResponseExchangeName string, handler func(interface{}) (interface{}, bool), eventType reflect.Type) {

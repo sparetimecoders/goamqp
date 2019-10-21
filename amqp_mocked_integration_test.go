@@ -375,9 +375,9 @@ type MockRequestResponseHandler struct {
 func (m *MockRequestResponseHandler) Process(msg interface{}) (interface{}, bool) {
 	if x, ok := msg.(*TestMessage); ok {
 		m.Received <- *x
-		return &Response{Ok:true}, x.Success
+		return &Response{Ok: true}, x.Success
 	}
-	return &Response{Ok:false}, false
+	return &Response{Ok: false}, false
 }
 
 func TestRequestResponseHandler(t *testing.T) {

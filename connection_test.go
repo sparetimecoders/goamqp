@@ -77,7 +77,7 @@ type OtherMessage struct {
 type RequestResponseMessageHandler struct{}
 
 func (i RequestResponseMessageHandler) Process(m interface{}) (interface{}, bool) {
-	return &OtherMessage{Name:"other"}, true
+	return &OtherMessage{Name: "other"}, true
 }
 
 type MultiTypeMessageHandler struct{}
