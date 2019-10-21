@@ -2,26 +2,34 @@ package goamqp
 
 import (
 	"fmt"
+	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestAddRequestResponseHandlerError(t *testing.T) {
+func TestSetupErrors(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
-	err := c.AddRequestResponseHandler("key", &incorrectRequestResponseMessageHandler{}).
-		AddRequestResponseHandler("key", &RequestResponseMessageHandler{}).
-		AddRequestResponseHandler("key", &RequestResponseMessageHandler{}).
-		AddEventStreamListener("key", &TestIncomingMessageHandler{}).
-		AddEventStreamListener("key", &incorrectProcessArgumentCount{}).
-		AddEventStreamListener("key", &TestIncomingMessageHandler{}).(*connection).setup()
+	publisher := make(chan interface{})
+	confirm := make(chan amqp.Confirmation)
+	handler := &RequestResponseMessageHandler{}
+	incomingHandler := &TestIncomingMessageHandler{}
+	err := c.
+		AddRequestResponseHandler("key", handler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddRequestResponseHandler("key", handler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddServicePublisher("target", "key", publisher, incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddPublishNotify(confirm).
+	(*connection).setup()
 	assert.Error(t, err)
-	assert.Len(t, strings.Split(err.Error(), "\n"), 5)
-	assert.Contains(t, err.Error(), "handler goamqp.incorrectRequestResponseMessageHandler has incorrect number of return values. Expected 1, actual 0")
-	assert.Contains(t, err.Error(), "routingkey key for queue events.topic.exchange.queue.svc already assigned to handler goamqp.TestIncomingMessageHandler, cannot assign goamqp.TestIncomingMessageHandler")
-	assert.Contains(t, err.Error(), "routingkey key for queue svc.direct.exchange.request.queue already assigned to handler goamqp.RequestResponseMessageHandler, cannot assign goamqp.RequestResponseMessageHandler")
-	assert.Contains(t, err.Error(), "handler goamqp.incorrectProcessArgumentCount has incorrect number of arguments, expected 1 but was 0")
+	errors := strings.Split(err.Error(), "\n")
+	assert.Len(t, errors, 3)
+	assert.Equal(t, "errors found during setup,", errors[0])
+	assert.Equal(t, "\troutingkey key for queue svc.direct.exchange.request.queue already assigned to handler for type goamqp.IncomingMessage, cannot assign goamqp.IncomingMessage", errors[1])
+	assert.Equal(t, "\troutingkey key for queue events.topic.exchange.queue.svc already assigned to handler for type goamqp.IncomingMessage, cannot assign goamqp.IncomingMessage", errors[2])
 }
 
 func TestFailingSetupFunc(t *testing.T) {
@@ -30,21 +38,35 @@ func TestFailingSetupFunc(t *testing.T) {
 }
 
 func TestNewFromURL_InvalidURL(t *testing.T) {
-  c := NewFromURL("test", "amqp://")
-  assert.NotNil(t, c)
-  assert.Equal(t, 1, len(c.(*connection).setupErrors))
-  assert.EqualError(t, c.(*connection).setupErrors[0], "connection url is invalid, amqp://")
+	c := NewFromURL("test", "amqp://")
+	assert.NotNil(t, c)
+	assert.Equal(t, 1, len(c.(*connection).setupErrors))
+	assert.EqualError(t, c.(*connection).setupErrors[0], "connection url is invalid, amqp://")
 }
 
 func TestNewFromURL_ValidURL(t *testing.T) {
-  c := NewFromURL("test", "amqp://user:password@localhost:5672/")
-  assert.NotNil(t, c)
-  assert.Equal(t, 0, len(c.(*connection).setupErrors))
+	c := NewFromURL("test", "amqp://user:password@localhost:5672/")
+	assert.NotNil(t, c)
+	assert.Equal(t, 0, len(c.(*connection).setupErrors))
+}
+
+func TestMultiType(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+
+	handler := &MultiTypeMessageHandler{}
+
+	err := c.
+		AddEventStreamListener("Msg", handler.Process, reflect.TypeOf(&IncomingMessage{})).(*connection).
+		AddEventStreamListener("Other", handler.Process, reflect.TypeOf(&OtherMessage{})).(*connection).
+		setup()
+
+	assert.NoError(t, err)
 }
 
 type TestIncomingMessageHandler struct{}
 
-func (i TestIncomingMessageHandler) Process(m IncomingMessage) bool {
+func (i TestIncomingMessageHandler) Process(m interface{}) bool {
 	return true
 }
 
@@ -52,8 +74,24 @@ type IncomingMessage struct {
 	URL string
 }
 
+type OtherMessage struct {
+	Name string `json:"name"`
+}
+
 type RequestResponseMessageHandler struct{}
 
-func (i RequestResponseMessageHandler) Process(m IncomingMessage) (string, bool) {
-	return "", true
+func (i RequestResponseMessageHandler) Process(m interface{}) (interface{}, bool) {
+	return &OtherMessage{Name: "other"}, true
+}
+
+type MultiTypeMessageHandler struct{}
+
+func (h MultiTypeMessageHandler) Process(m interface{}) bool {
+	switch e := m.(type) {
+	case IncomingMessage:
+		fmt.Println(e.URL)
+	case OtherMessage:
+		fmt.Println(e.Name)
+	}
+	return true
 }
