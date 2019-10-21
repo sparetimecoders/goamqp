@@ -2,6 +2,7 @@ package goamqp
 
 import (
 	"fmt"
+	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 	"reflect"
 	"strings"
@@ -12,6 +13,7 @@ func TestSetupErrors(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
 	publisher := make(chan interface{})
+	confirm := make(chan amqp.Confirmation)
 	handler := &RequestResponseMessageHandler{}
 	incomingHandler := &TestIncomingMessageHandler{}
 	err := c.
@@ -19,7 +21,9 @@ func TestSetupErrors(t *testing.T) {
 		AddRequestResponseHandler("key", handler.Process, reflect.TypeOf(IncomingMessage{})).
 		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
 		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
-		AddServicePublisher("target", "key", publisher, incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).(*connection).setup()
+		AddServicePublisher("target", "key", publisher, incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddPublishNotify(confirm).
+	(*connection).setup()
 	assert.Error(t, err)
 	errors := strings.Split(err.Error(), "\n")
 	assert.Len(t, errors, 3)

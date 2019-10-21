@@ -26,6 +26,7 @@ type Connection interface {
 	AddEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Connection
 	AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler func(interface{}) bool, eventType reflect.Type) Connection
 	AddRequestResponseHandler(routingKey string, handler func(interface{}) (interface{}, bool), eventType reflect.Type) Connection
+	AddPublishNotify(confirm chan amqp.Confirmation) Connection
 	Start() (io.Closer, error)
 }
 
@@ -136,6 +137,15 @@ func (c *connection) AddRequestResponseHandler(routingKey string, handler func(i
 	return c
 }
 
+func (c *connection) AddPublishNotify(confirm chan amqp.Confirmation) Connection {
+	c.appendSetupFuncs(func(channel amqpChannel) error {
+		log.Printf("setting up publish confirmations\n")
+		channel.NotifyPublish(confirm)
+		return channel.Confirm(false)
+	})
+	return c
+}
+
 func (c *connection) Start() (io.Closer, error) {
 	if c.started {
 		return c.connection, fmt.Errorf("already started")
@@ -144,21 +154,22 @@ func (c *connection) Start() (io.Closer, error) {
 		return nil, joinErrors(c.setupErrors...)
 	}
 
-	connection, channel, err := connectToAmqpURL(c.config)
-	c.channel = channel
-	c.connection = connection
-	if err != nil {
-		return nil, err
+	if c.channel == nil {
+		connection, channel, err := connectToAmqpURL(c.config)
+		c.channel = channel
+		c.connection = connection
+		if err != nil {
+			return nil, err
+		}
+
+		if err := c.setup(); err != nil {
+			return nil, err
+		}
+
+		go c.handleCloseEvent()
+		channel.NotifyClose(c.channelCloseListener)
+		connection.NotifyClose(c.connectionCloseListener)
 	}
-
-	if err := c.setup(); err != nil {
-		return nil, err
-	}
-
-	go c.handleCloseEvent()
-	channel.NotifyClose(c.channelCloseListener)
-	connection.NotifyClose(c.connectionCloseListener)
-
 	c.started = true
 	return c, nil
 }
@@ -217,6 +228,8 @@ type amqpChannel interface {
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
 	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
+	Confirm(noWait bool) error
 }
 
 var deleteQueueAfter = 5 * 24 * time.Hour
