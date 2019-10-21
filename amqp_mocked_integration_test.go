@@ -407,9 +407,12 @@ func TestRequestResponseHandler(t *testing.T) {
 	channel.Delivery <- delivery
 	msg := <-handler.Received
 	ack := <-acker.Acks
+	response := <-channel.Published
+
 	assert.Equal(t, "test", msg.Msg)
 	assert.Equal(t, false, ack.multiple)
 	assert.Equal(t, uint64(123), ack.tag)
+	assert.Equal(t, "{\"Ok\":true}", string(response.msg.Body))
 
 	delivery = amqp.Delivery{
 		RoutingKey:   "key",
@@ -425,7 +428,6 @@ func TestRequestResponseHandler(t *testing.T) {
 	assert.Equal(t, false, nack.multiple)
 	assert.Equal(t, true, nack.requeue)
 	assert.Equal(t, uint64(1), nack.tag)
-
 }
 
 func NewMockAmqpChannel() MockAmqpChannel {
