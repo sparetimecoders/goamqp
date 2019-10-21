@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"gitlab.com/sparetimecoders/goamqp"
 	"log"
+	"reflect"
 	"time"
 )
 
@@ -37,8 +38,9 @@ func Example() {
 	}
 	publisher := make(chan interface{})
 
+	handler := &TestIncomingMessageHandler{}
 	connection, err := goamqp.New("service", config).
-		AddEventStreamListener("testkey", &TestIncomingMessageHandler{}).
+		AddEventStreamListener("testkey", handler.Process, reflect.TypeOf(IncomingMessage{})).
 		AddEventStreamPublisher("testkey", publisher).
 		Start()
 	if err != nil {
@@ -54,7 +56,7 @@ type TestIncomingMessageHandler struct {
 	ctx string
 }
 
-func (i TestIncomingMessageHandler) Process(m IncomingMessage) bool {
+func (i TestIncomingMessageHandler) Process(m interface{}) bool {
 	fmt.Printf("Called process with %v and ctx %v\n", m, i.ctx)
 	return true
 }

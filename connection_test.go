@@ -14,29 +14,22 @@ func TestSetupErrors(t *testing.T) {
 	c := mockConnection(&channel)
 	publisher := make(chan interface{})
 	confirm := make(chan amqp.Confirmation)
+	handler := &RequestResponseMessageHandler{}
+	incomingHandler := &TestIncomingMessageHandler{}
 	err := c.
-		AddRequestResponseHandler("key", &incorrectRequestResponseMessageHandler{}).
-		AddRequestResponseHandler("key", &incorrectRequestResponseMessageHandler{}, reflect.TypeOf(&IncomingMessage{}), reflect.TypeOf(&OtherMessage{})).
-		AddRequestResponseHandler("key", &RequestResponseMessageHandler{}).
-		AddRequestResponseHandler("key", &RequestResponseMessageHandler{}).
-		AddEventStreamListener("key", &TestIncomingMessageHandler{}).
-		AddEventStreamListener("key", &TestIncomingMessageHandler{}, reflect.TypeOf(&IncomingMessage{}), reflect.TypeOf(&OtherMessage{})).
-		AddEventStreamListener("key", &incorrectProcessArgumentCount{}).
-		AddEventStreamListener("key", &TestIncomingMessageHandler{}).
-		AddServicePublisher("target", "key", publisher, &TestIncomingMessageHandler{}, reflect.TypeOf(&IncomingMessage{}), reflect.TypeOf(&OtherMessage{})).
+		AddRequestResponseHandler("key", handler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddRequestResponseHandler("key", handler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
+		AddServicePublisher("target", "key", publisher, incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
 		AddPublishNotify(confirm).
 	(*connection).setup()
 	assert.Error(t, err)
 	errors := strings.Split(err.Error(), "\n")
-	assert.Len(t, errors, 8)
+	assert.Len(t, errors, 3)
 	assert.Equal(t, "errors found during setup,", errors[0])
-	assert.Equal(t, "\thandler goamqp.incorrectRequestResponseMessageHandler has incorrect number of return values. Expected 1, actual 0", errors[1])
-	assert.Equal(t, "\tmore than one type provided", errors[2])
-	assert.Equal(t, "\troutingkey key for queue svc.direct.exchange.request.queue already assigned to handler goamqp.RequestResponseMessageHandler, cannot assign goamqp.RequestResponseMessageHandler", errors[3])
-	assert.Equal(t, "\tmore than one type provided", errors[4])
-	assert.Equal(t, "\thandler goamqp.incorrectProcessArgumentCount has incorrect number of arguments, expected 1 but was 0", errors[5])
-	assert.Equal(t, "\troutingkey key for queue events.topic.exchange.queue.svc already assigned to handler goamqp.TestIncomingMessageHandler, cannot assign goamqp.TestIncomingMessageHandler", errors[6])
-	assert.Equal(t, "\tmore than one type provided", errors[7])
+	assert.Equal(t, "\troutingkey key for queue svc.direct.exchange.request.queue already assigned to handler for type goamqp.IncomingMessage, cannot assign goamqp.IncomingMessage", errors[1])
+	assert.Equal(t, "\troutingkey key for queue events.topic.exchange.queue.svc already assigned to handler for type goamqp.IncomingMessage, cannot assign goamqp.IncomingMessage", errors[2])
 }
 
 func TestFailingSetupFunc(t *testing.T) {
@@ -64,8 +57,8 @@ func TestMultiType(t *testing.T) {
 	handler := &MultiTypeMessageHandler{}
 
 	err := c.
-		AddEventStreamListener("Msg", handler, reflect.TypeOf(&IncomingMessage{})).(*connection).
-		AddEventStreamListener("Other", handler, reflect.TypeOf(&OtherMessage{})).(*connection).
+		AddEventStreamListener("Msg", handler.Process, reflect.TypeOf(&IncomingMessage{})).(*connection).
+		AddEventStreamListener("Other", handler.Process, reflect.TypeOf(&OtherMessage{})).(*connection).
 		setup()
 
 	assert.NoError(t, err)
@@ -73,7 +66,7 @@ func TestMultiType(t *testing.T) {
 
 type TestIncomingMessageHandler struct{}
 
-func (i TestIncomingMessageHandler) Process(m IncomingMessage) bool {
+func (i TestIncomingMessageHandler) Process(m interface{}) bool {
 	return true
 }
 
@@ -82,13 +75,13 @@ type IncomingMessage struct {
 }
 
 type OtherMessage struct {
-	Name string
+	Name string `json:"name"`
 }
 
 type RequestResponseMessageHandler struct{}
 
-func (i RequestResponseMessageHandler) Process(m IncomingMessage) (string, bool) {
-	return "", true
+func (i RequestResponseMessageHandler) Process(m interface{}) (interface{}, bool) {
+	return &OtherMessage{Name: "other"}, true
 }
 
 type MultiTypeMessageHandler struct{}
