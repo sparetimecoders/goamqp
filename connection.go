@@ -229,6 +229,7 @@ type amqpChannel interface {
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
 	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
 	NotifyClose(c chan *amqp.Error) chan *amqp.Error
 	Confirm(noWait bool) error
 }
@@ -236,7 +237,6 @@ type amqpChannel interface {
 type amqpConnection interface {
 	io.Closer
 	NotifyClose(receiver chan *amqp.Error) chan *amqp.Error
-	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
 }
 
 var deleteQueueAfter = 5 * 24 * time.Hour
