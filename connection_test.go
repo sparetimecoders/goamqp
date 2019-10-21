@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"gitlab.com/sparetimecoders/goamqp/internal"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestSetupErrors(t *testing.T) {
 }
 
 func TestFailingSetupFunc(t *testing.T) {
-	c := connection{setupFuncs: []setupFunc{func(channel amqpChannel) error { return nil }, func(channel amqpChannel) error { return fmt.Errorf("error message") }}}
+	c := connection{logger: internal.StdLogger{Level: internal.TraceLevel}, setupFuncs: []setupFunc{func(channel amqpChannel) error { return nil }, func(channel amqpChannel) error { return fmt.Errorf("error message") }}}
 	assert.EqualError(t, c.setup(), "setup function <gitlab.com/sparetimecoders/goamqp.TestFailingSetupFunc.func2> failed, error message")
 }
 

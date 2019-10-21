@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"io"
-	"log"
 	"reflect"
 	"runtime"
 	"strings"
@@ -26,6 +25,7 @@ type Connection interface {
 	AddEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Connection
 	AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler func(interface{}) bool, eventType reflect.Type) Connection
 	AddRequestResponseHandler(routingKey string, handler func(interface{}) (interface{}, bool), eventType reflect.Type) Connection
+	WithLogger(logger Logger) Connection
 	AddPublishNotify(confirm chan amqp.Confirmation) Connection
 	Start() (io.Closer, error)
 }
@@ -49,7 +49,7 @@ func (c *connection) AddEventStreamPublisher(routingKey string, publisher chan i
 		return c.exchangeDeclare(channel, eventsExchangeName(), "topic")
 	})
 	c.appendSetupFuncs(func(channel amqpChannel) error {
-		go c.publish(channel, publisher, routingKey, eventsExchangeName())
+		go c.publish(publisher, routingKey, eventsExchangeName())
 		return nil
 	})
 	return c
@@ -65,10 +65,10 @@ func (c *connection) AddEventStreamListener(routingKey string, handler func(inte
 			return c.exchangeDeclare(channel, exchangeName, "topic")
 		},
 		func(channel amqpChannel) error {
-			return queueDeclare(channel, queueName)
+			return c.queueDeclare(queueName)
 		},
 		func(channel amqpChannel) error {
-			return bindQueueToExchange(channel, exchangeName, queueName, routingKey, amqp.Table{})
+			return c.bindQueueToExchange(exchangeName, queueName, routingKey, amqp.Table{})
 		},
 	)
 	return c
@@ -83,16 +83,16 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 			return c.exchangeDeclare(channel, resExchangeName, "headers")
 		},
 			func(channel amqpChannel) error {
-				return queueDeclare(channel, resQueueName)
+				return c.queueDeclare(resQueueName)
 			},
 			func(channel amqpChannel) error {
 				headers := amqp.Table{}
 				headers["x-match"] = "all"
-				return bindQueueToExchange(channel, resExchangeName, resQueueName, routingKey, headers)
+				return c.bindQueueToExchange(resExchangeName, resQueueName, routingKey, headers)
 			},
 		)
 	} else {
-		log.Printf("handler is nil for service %s, will not setup response listener for target service %s", c.serviceName, targetService)
+		c.logger.Infof("handler is nil for service %s, will not setup response listener for target service %s", c.serviceName, targetService)
 	}
 
 	reqExchangeName := serviceRequestExchangeName(targetService)
@@ -102,7 +102,7 @@ func (c *connection) AddServicePublisher(targetService, routingKey string, publi
 			return c.exchangeDeclare(channel, reqExchangeName, "direct")
 		},
 		func(channel amqpChannel) error {
-			go c.publish(channel, publisher, routingKey, reqExchangeName)
+			go c.publish(publisher, routingKey, reqExchangeName)
 			return nil
 		},
 	)
@@ -128,10 +128,10 @@ func (c *connection) AddRequestResponseHandler(routingKey string, handler func(i
 			return c.exchangeDeclare(channel, reqExchangeName, "direct")
 		},
 		func(channel amqpChannel) error {
-			return queueDeclare(channel, reqQueueName)
+			return c.queueDeclare(reqQueueName)
 		},
 		func(channel amqpChannel) error {
-			return bindQueueToExchange(channel, reqExchangeName, reqQueueName, routingKey, amqp.Table{})
+			return c.bindQueueToExchange(reqExchangeName, reqQueueName, routingKey, amqp.Table{})
 		},
 	)
 	return c
@@ -139,7 +139,7 @@ func (c *connection) AddRequestResponseHandler(routingKey string, handler func(i
 
 func (c *connection) AddPublishNotify(confirm chan amqp.Confirmation) Connection {
 	c.appendSetupFuncs(func(channel amqpChannel) error {
-		log.Printf("setting up publish confirmations\n")
+		c.logger.Info("setting up publish confirmations\n")
 		channel.NotifyPublish(confirm)
 		return channel.Confirm(false)
 	})
@@ -155,21 +155,21 @@ func (c *connection) Start() (io.Closer, error) {
 	}
 
 	if c.channel == nil {
-		connection, channel, err := connectToAmqpURL(c.config)
-		c.channel = channel
-		c.connection = connection
+
+		err := c.connectToAmqpURL()
 		if err != nil {
 			return nil, err
 		}
-
-		if err := c.setup(); err != nil {
-			return nil, err
-		}
-
-		go c.handleCloseEvent()
-		channel.NotifyClose(c.channelCloseListener)
-		connection.NotifyClose(c.connectionCloseListener)
 	}
+
+	if err := c.setup(); err != nil {
+		return nil, err
+	}
+
+	go c.handleCloseEvent()
+	c.channel.NotifyClose(c.channelCloseListener)
+	c.connection.NotifyClose(c.connectionCloseListener)
+
 	c.started = true
 	return c, nil
 }
@@ -186,6 +186,7 @@ func newConnection(serviceName string, config AmqpConfig, errors ...error) Conne
 		setupErrors:             errors,
 		connectionCloseListener: make(chan *amqp.Error),
 		channelCloseListener:    make(chan *amqp.Error),
+		logger:                  StdLogger(),
 	}
 }
 
@@ -193,7 +194,7 @@ func (c *connection) setup() error {
 	if len(c.setupErrors) > 0 {
 		return joinErrors(c.setupErrors...)
 	}
-	log.Println("setting up exchanges, queue, bindings and handlers")
+	c.logger.Info("setting up exchanges, queue, bindings and handlers")
 	for _, f := range c.setupFuncs {
 		if err := f(c.channel); err != nil {
 			return fmt.Errorf("setup function <%s> failed, %v", runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), err)
@@ -210,15 +211,15 @@ func (c *connection) setup() error {
 		queueHandlers := make(map[string]messageHandlerInvoker)
 		for _, kh := range h {
 			queueHandlers[kh.routingKey] = kh
-			log.Printf("setting up flow '%s' filtererd by '%s' to handler\n", q, kh.routingKey)
+			c.logger.Debugf("setting up flow '%s' filtererd by '%s' to handler\n", q, kh.routingKey)
 		}
 		consumer, err := consume(c.channel, q)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", q, err)
 		}
-		go divertToMessageHandlers(c.channel, consumer, queueHandlers)
+		go c.divertToMessageHandlers(consumer, queueHandlers)
 	}
-	log.Println("done setting up exchanges, queue, bindings and handlers")
+	c.logger.Info("done setting up exchanges, queue, bindings and handlers")
 	return nil
 }
 
@@ -228,8 +229,14 @@ type amqpChannel interface {
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
 	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
-	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
+	NotifyClose(c chan *amqp.Error) chan *amqp.Error
 	Confirm(noWait bool) error
+}
+
+type amqpConnection interface {
+	io.Closer
+	NotifyClose(receiver chan *amqp.Error) chan *amqp.Error
+	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
 }
 
 var deleteQueueAfter = 5 * 24 * time.Hour
@@ -239,31 +246,34 @@ type connection struct {
 	started                 bool
 	serviceName             string
 	config                  AmqpConfig
-	connection              io.Closer
+	connection              amqpConnection
 	channel                 amqpChannel
 	handlers                map[queueRoutingKey]messageHandlerInvoker
 	setupFuncs              []setupFunc
 	setupErrors             []error
 	connectionCloseListener chan *amqp.Error
 	channelCloseListener    chan *amqp.Error
+	logger                  Logger
 }
 
 var _ amqpChannel = &amqp.Channel{}
 var _ Connection = &connection{}
 
-func connectToAmqpURL(config AmqpConfig) (*amqp.Connection, *amqp.Channel, error) {
-	log.Printf("connecting to %s", config)
+func (c *connection) connectToAmqpURL() error {
+	c.logger.Infof("connecting to %s", c.config)
 
-	conn, err := amqp.Dial(config.AmqpURL())
+	conn, err := amqp.Dial(c.config.AmqpURL())
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 	ch, err := conn.Channel()
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
-	return conn, ch, nil
+	c.channel = ch
+	c.connection = conn
+	return nil
 }
 
 type queueRoutingKey struct {
@@ -279,20 +289,25 @@ type messageHandlerInvoker struct {
 	eventType reflect.Type
 }
 
-func divertToMessageHandlers(channel amqpChannel, deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
+func (c *connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
 	for d := range deliveries {
 		if h, ok := handlers[d.RoutingKey]; ok {
 			if h.responseExchange != "" {
-				handleRequestResponse(channel, d, h)
+				c.handleRequestResponse(d, h)
 			} else {
-				handleMessage(d, h.msgHandler, h.eventType)
+				c.handleMessage(d, h.msgHandler, h.eventType)
 			}
 		} else {
 			// Unhandled message
-			log.Printf("unhandled message for key %s from exchange %s - dropping it", d.RoutingKey, d.Exchange)
-			d.Reject(false)
+			c.logger.Debug("unhandled message for key %s from exchange %s - dropping it", d.RoutingKey, d.Exchange)
+			_ = d.Reject(false)
 		}
 	}
+}
+
+func (c *connection) WithLogger(logger Logger) Connection {
+	c.logger = logger
+	return c
 }
 
 func parseMessage(jsonContent []byte, eventType reflect.Type) (interface{}, error) {
@@ -303,7 +318,7 @@ func parseMessage(jsonContent []byte, eventType reflect.Type) (interface{}, erro
 	return target, nil
 }
 
-func publishMessage(channel amqpChannel, msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
+func (c *connection) publishMessage(msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -319,8 +334,9 @@ func publishMessage(channel amqpChannel, msg interface{}, routingKey, exchangeNa
 		DeliveryMode: 2,
 		Headers:      headers,
 	}
-	log.Printf("Publishing %+v", publishing)
-	return channel.Publish(exchangeName,
+	c.logger.Debugf("Publishing %+v", publishing)
+
+	return c.channel.Publish(exchangeName,
 		routingKey,
 		false,
 		false,
@@ -328,52 +344,52 @@ func publishMessage(channel amqpChannel, msg interface{}, routingKey, exchangeNa
 	)
 }
 
-func (c *connection) publish(channel amqpChannel, p <-chan interface{}, routingKey, exchangeName string) {
+func (c *connection) publish(p <-chan interface{}, routingKey, exchangeName string) {
 	headers := amqp.Table{}
 	headers["service"] = c.serviceName
 	for msg := range p {
-		err := publishMessage(channel, msg, routingKey, exchangeName, headers)
+		err := c.publishMessage(msg, routingKey, exchangeName, headers)
 		if err != nil {
-			log.Printf("failed to publish %v", err)
+			c.logger.Errorf("failed to publish %v", err)
 		}
 	}
 }
 
-func handleRequestResponse(channel amqpChannel, d amqp.Delivery, invoker messageHandlerInvoker) {
+func (c *connection) handleRequestResponse(d amqp.Delivery, invoker messageHandlerInvoker) {
 	handler := invoker.responseHandler
 	message, err := parseMessage(d.Body, invoker.eventType)
 	if err != nil {
-		log.Printf("failed to handle message - will drop it, %v", err)
-		d.Reject(false)
+		c.logger.Errorf("failed to handle message - will drop it, %v", err)
+		_ = d.Reject(false)
 	} else {
 		if response, success := handler(message); success {
 			headers := amqp.Table{}
 			headers["service"] = d.Headers["service"]
-			if err := publishMessage(channel, response, invoker.routingKey, invoker.responseExchange, headers); err != nil {
-				log.Println("Failed to publish response!!!!")
+			if err := c.publishMessage(response, invoker.routingKey, invoker.responseExchange, headers); err != nil {
+				c.logger.Errorf("Failed to publish response - %s", response)
 			}
-			log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
+			c.logger.Tracef("message [%s] handled successfully and will be ACKED", d.MessageId)
 			_ = d.Ack(false)
 		} else {
-			log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
+			c.logger.Tracef("message handler returned false, message [%s] will be NACKED", d.MessageId)
 			_ = d.Nack(false, true)
 		}
 		// TODO Use something other than MessageId (since its empty...)
 	}
 }
 
-func handleMessage(d amqp.Delivery, handler func(interface{}) bool, eventType reflect.Type) {
+func (c *connection) handleMessage(d amqp.Delivery, handler func(interface{}) bool, eventType reflect.Type) {
 	message, err := parseMessage(d.Body, eventType)
 	if err != nil {
-		log.Printf("failed to handle message - will drop it, %v", err)
-		d.Reject(false)
+		c.logger.Error("failed to handle message - will drop it, %v", err)
+		_ = d.Reject(false)
 	} else {
 		// TODO Use something other than MessageId (since its empty...)
 		if success := handler(message); success {
-			log.Printf("message [%s] handled successfully and will be ACKED", d.MessageId)
+			c.logger.Tracef("message [%s] handled successfully and will be ACKED", d.MessageId)
 			_ = d.Ack(false)
 		} else {
-			log.Printf("message handler returned false, message [%s] will be NACKED", d.MessageId)
+			c.logger.Tracef("message handler returned false, message [%s] will be NACKED", d.MessageId)
 			_ = d.Nack(false, true)
 		}
 	}
@@ -392,7 +408,7 @@ func consume(channel amqpChannel, queue string) (<-chan amqp.Delivery, error) {
 }
 
 func (c *connection) exchangeDeclare(channel amqpChannel, name, kind string) error {
-	log.Printf("creating exchange with name: %s, and kind: %s", name, kind)
+	c.logger.Debugf("creating exchange with name: %s, and kind: %s", name, kind)
 	args := amqp.Table{}
 	if c.config.DelayedMessage {
 		args["x-delayed-type"] = kind
@@ -410,10 +426,10 @@ func (c *connection) exchangeDeclare(channel amqpChannel, name, kind string) err
 	)
 }
 
-func queueDeclare(channel amqpChannel, name string) error {
-	log.Printf("creating queue with name: %s", name)
+func (c *connection) queueDeclare(name string) error {
+	c.logger.Debugf("creating queue with name: %s", name)
 
-	_, err := channel.QueueDeclare(name,
+	_, err := c.channel.QueueDeclare(name,
 		true,
 		false,
 		false,
@@ -423,9 +439,9 @@ func queueDeclare(channel amqpChannel, name string) error {
 	return err
 }
 
-func bindQueueToExchange(channel amqpChannel, exchangeName, queueName, routingKey string, headers amqp.Table) error {
-	log.Printf("binding queue with name: %s to exchange: %s with routingkey: %s", queueName, exchangeName, routingKey)
-	return channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
+func (c *connection) bindQueueToExchange(exchangeName, queueName, routingKey string, headers amqp.Table) error {
+	c.logger.Debugf("binding queue with name: %s to exchange: %s with routingkey: %s", queueName, exchangeName, routingKey)
+	return c.channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
 }
 
 func (c *connection) addMsgHandler(queueName, routingKey string, handler func(interface{}) bool, eventType reflect.Type) {
@@ -434,7 +450,7 @@ func (c *connection) addMsgHandler(queueName, routingKey string, handler func(in
 		c.addError(fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s", routingKey, queueName, existing.eventType, eventType))
 		return
 	}
-	log.Printf("routingkey %s for queue %s assigned to handler for type %s", routingKey, queueName, eventType)
+	c.logger.Debugf("routingkey %s for queue %s assigned to handler for type %s", routingKey, queueName, eventType)
 	c.handlers[uniqueKey] = messageHandlerInvoker{msgHandler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, eventType: eventType}
 }
 
@@ -444,7 +460,7 @@ func (c *connection) addResponseHandler(queueName, routingKey, serviceResponseEx
 		c.addError(fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s", routingKey, queueName, existing.eventType, eventType))
 		return
 	}
-	log.Printf("routingkey %s for queue %s assigned to handler for type %s", routingKey, queueName, eventType)
+	c.logger.Debugf("routingkey %s for queue %s assigned to handler for type %s", routingKey, queueName, eventType)
 	c.handlers[uniqueKey] = messageHandlerInvoker{responseHandler: handler, queueRoutingKey: queueRoutingKey{queue: queueName, routingKey: routingKey}, responseExchange: serviceResponseExchangeName, eventType: eventType}
 }
 
@@ -471,11 +487,11 @@ func (c *connection) handleCloseEvent() {
 		select {
 		case e, ok := <-c.connectionCloseListener:
 			if ok {
-				fmt.Printf("Connection closed %+v \n", e)
+				c.logger.Info("Connection closed %+v \n", e)
 			}
 		case e, ok := <-c.channelCloseListener:
 			if ok {
-				fmt.Printf("Channel closed %+v \n", e)
+				c.logger.Info("Channel closed %+v \n", e)
 			}
 		}
 	}
