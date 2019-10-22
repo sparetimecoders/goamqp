@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
-	"gitlab.com/sparetimecoders/goamqp/internal"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,8 +22,7 @@ func TestSetupErrors(t *testing.T) {
 		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
 		AddEventStreamListener("key", incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
 		AddServicePublisher("target", "key", publisher, incomingHandler.Process, reflect.TypeOf(IncomingMessage{})).
-		AddPublishNotify(confirm).
-	(*connection).setup()
+		AddPublishNotify(confirm).(*connection).setup()
 	assert.Error(t, err)
 	errors := strings.Split(err.Error(), "\n")
 	assert.Len(t, errors, 3)
@@ -34,7 +32,7 @@ func TestSetupErrors(t *testing.T) {
 }
 
 func TestFailingSetupFunc(t *testing.T) {
-	c := connection{logger: internal.StdLogger{Level: internal.TraceLevel}, setupFuncs: []setupFunc{func(channel amqpChannel) error { return nil }, func(channel amqpChannel) error { return fmt.Errorf("error message") }}}
+	c := connection{logger: NewStdLogger(), setupFuncs: []setupFunc{func(channel amqpChannel) error { return nil }, func(channel amqpChannel) error { return fmt.Errorf("error message") }}}
 	assert.EqualError(t, c.setup(), "setup function <gitlab.com/sparetimecoders/goamqp.TestFailingSetupFunc.func2> failed, error message")
 }
 

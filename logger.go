@@ -1,9 +1,6 @@
 package goamqp
 
-import (
-	"gitlab.com/sparetimecoders/goamqp/internal"
-)
-
+// Logger is the interface to use in applications
 type Logger interface {
 	Info(args ...interface{})
 	Infof(format string, args ...interface{})
@@ -13,8 +10,4 @@ type Logger interface {
 	Errorf(format string, args ...interface{})
 	Trace(args ...interface{})
 	Tracef(format string, args ...interface{})
-}
-
-func StdLogger() Logger {
-	return internal.StdLogger{Level: internal.InfoLevel}
 }

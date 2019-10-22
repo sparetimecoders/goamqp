@@ -186,7 +186,7 @@ func newConnection(serviceName string, config AmqpConfig, errors ...error) Conne
 		setupErrors:             errors,
 		connectionCloseListener: make(chan *amqp.Error),
 		channelCloseListener:    make(chan *amqp.Error),
-		logger:                  StdLogger(),
+		logger:                  NewStdLogger(),
 	}
 }
 
