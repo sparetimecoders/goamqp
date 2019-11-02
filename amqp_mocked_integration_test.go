@@ -20,6 +20,7 @@
 package goamqp
 
 import (
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 	"reflect"
@@ -188,6 +189,7 @@ func TestCloseCallsUnderlyingCloseMethods(t *testing.T) {
 	_ = conn.Close()
 	assert.True(t, closer.Called)
 }
+
 func TestDelayedMessagingDisabled(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	c := mockConnection(&channel)
@@ -214,6 +216,25 @@ func TestEventListenerSetup(t *testing.T) {
 
 	assert.Equal(t, 1, len(channel.Consumers))
 	assert.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
+}
+
+func TestTransientEventListenerSetup(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	c := mockConnection(&channel)
+	handler := &MockIncomingMessageHandler{}
+	uuid.SetRand(&badRand{})
+	_ = c.AddTransientEventStreamListener("key", handler.Process, reflect.TypeOf(TestMessage{})).(*connection).setup()
+	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
+	assert.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "topic"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+
+	assert.Equal(t, 1, len(channel.QueueDeclarations))
+	assert.Equal(t, QueueDeclaration{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", noWait: false, autoDelete: true, durable: false, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
+
+	assert.Equal(t, 1, len(channel.BindingDeclarations))
+	assert.Equal(t, BindingDeclaration{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", noWait: false, exchange: "events.topic.exchange", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
+
+	assert.Equal(t, 1, len(channel.Consumers))
+	assert.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
 }
 
 func TestEventListener(t *testing.T) {
@@ -476,4 +497,13 @@ func mockConnection(channel *MockAmqpChannel) *connection {
 	conn.(*connection).channel = channel
 
 	return conn.(*connection)
+}
+
+type badRand struct{}
+
+func (r badRand) Read(buf []byte) (int, error) {
+	for i := range buf {
+		buf[i] = byte(i)
+	}
+	return len(buf), nil
 }
