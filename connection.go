@@ -23,6 +23,7 @@ type DelayedMessage interface {
 type Connection interface {
 	AddEventStreamPublisher(routingKey string, publisher chan interface{}) Connection
 	AddEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Connection
+	AddTransientEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Connection
 	AddServicePublisher(targetService, routingKey string, publisher chan interface{}, handler func(interface{}) bool, eventType reflect.Type) Connection
 	AddRequestResponseHandler(routingKey string, handler func(interface{}) (interface{}, bool), eventType reflect.Type) Connection
 	WithLogger(logger Logger) Connection
@@ -66,6 +67,25 @@ func (c *connection) AddEventStreamListener(routingKey string, handler func(inte
 		},
 		func(channel amqpChannel) error {
 			return c.queueDeclare(queueName)
+		},
+		func(channel amqpChannel) error {
+			return c.bindQueueToExchange(exchangeName, queueName, routingKey, amqp.Table{})
+		},
+	)
+	return c
+}
+
+func (c *connection) AddTransientEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Connection {
+	queueName := serviceEventRandomQueueName(c.serviceName)
+	exchangeName := eventsExchangeName()
+	c.addMsgHandler(queueName, routingKey, handler, eventType)
+
+	c.appendSetupFuncs(
+		func(channel amqpChannel) error {
+			return c.exchangeDeclare(channel, exchangeName, "topic")
+		},
+		func(channel amqpChannel) error {
+			return c.transientQueueDeclare(queueName)
 		},
 		func(channel amqpChannel) error {
 			return c.bindQueueToExchange(exchangeName, queueName, routingKey, amqp.Table{})
@@ -432,6 +452,19 @@ func (c *connection) queueDeclare(name string) error {
 	_, err := c.channel.QueueDeclare(name,
 		true,
 		false,
+		false,
+		false,
+		amqp.Table{"x-expires": int(deleteQueueAfter.Seconds() * 1000)},
+	)
+	return err
+}
+
+func (c *connection) transientQueueDeclare(name string) error {
+	c.logger.Debugf("creating temporary queue with name: %s", name)
+
+	_, err := c.channel.QueueDeclare(name,
+		false,
+		true,
 		false,
 		false,
 		amqp.Table{"x-expires": int(deleteQueueAfter.Seconds() * 1000)},

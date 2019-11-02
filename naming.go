@@ -2,6 +2,7 @@ package goamqp
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 )
 
 func eventsExchangeName() string {
@@ -14,6 +15,10 @@ func exchangeName(svcName, kind string) string {
 
 func serviceEventQueueName(service string) string {
 	return fmt.Sprintf("%s.queue.%s", eventsExchangeName(), service)
+}
+
+func serviceEventRandomQueueName(service string) string {
+	return fmt.Sprintf("%s.queue.%s-%s", eventsExchangeName(), service, randomString())
 }
 
 func serviceRequestExchangeName(svcName string) string {
@@ -30,4 +35,8 @@ func serviceRequestQueueName(service string) string {
 
 func serviceResponseQueueName(targetService, serviceName string) string {
 	return fmt.Sprintf("%s.queue.%s", serviceResponseExchangeName(targetService), serviceName)
+}
+
+func randomString() string {
+	return uuid.New().String()
 }
