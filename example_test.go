@@ -22,7 +22,6 @@ package goamqp_test
 import (
 	"fmt"
 	"gitlab.com/sparetimecoders/goamqp"
-	"log"
 	"reflect"
 	"time"
 )
@@ -39,17 +38,15 @@ func Example() {
 	publisher := make(chan interface{})
 
 	handler := &TestIncomingMessageHandler{}
-	connection, err := goamqp.New("service", config).
-		AddEventStreamListener("testkey", handler.Process, reflect.TypeOf(IncomingMessage{})).
-		AddEventStreamPublisher("testkey", publisher).
-		Start()
-	if err != nil {
-		log.Fatalln("failed to create publisher", err)
-	}
+	connection := goamqp.New("service", config)
+	_ = connection.Start(
+		goamqp.EventStreamListener("testkey", handler.Process, reflect.TypeOf(IncomingMessage{})),
+		goamqp.EventStreamPublisher("testkey", publisher),
+	)
 
 	publisher <- IncomingMessage{"FAILED"}
 	publisher <- IncomingMessage{"OK"}
-	connection.Close()
+	_ = connection.Close()
 }
 
 type TestIncomingMessageHandler struct {
