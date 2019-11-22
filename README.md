@@ -5,9 +5,26 @@
 package goamqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
 
 Download:
-```shell
+```bash
 go get gitlab.com/sparetimecoders/go_amqp
 ```
 
 
+# Developing
 
+## Tests
+
+```bash
+go test ./... 
+```
+
+## Integration testing
+Requires a running rabbitmq, for example:
+
+```bash
+docker run --name rabbit -p 15672:15672 -p 5672:5672 sparetimecoders/rabbitmq
+```
+Run the tests:
+```bash
+go test ./... -tags=integration
+```

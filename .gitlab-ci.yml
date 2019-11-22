@@ -49,10 +49,8 @@ test:
     - deps
   image: golang:1.12
   script:
-    - go get golang.org/x/lint/golint
     - go fmt $(go list ./...)
     - go vet $(go list ./...)
-    - golint -set_exit_status ./...
     - CGO_ENABLED=1 go test -mod=readonly -race -coverprofile=.testCoverage.txt -covermode=atomic -coverpkg=$(go list ./... | tr '\n' , | sed 's/,$//') ./...
     - go tool cover -html=.testCoverage.txt -o coverage.html
     - go tool cover -func=.testCoverage.txt

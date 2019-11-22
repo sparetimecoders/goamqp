@@ -1,6 +1,7 @@
 package goamqp
 
 import (
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -33,4 +34,9 @@ func TestServiceRequestQueueName(t *testing.T) {
 
 func TestServiceResponseQueueName(t *testing.T) {
 	assert.Equal(t, "target.headers.exchange.response.queue.svc", serviceResponseQueueName("target", "svc"))
+}
+
+func TestEventRandomQueueName(t *testing.T) {
+	uuid.SetRand(&badRand{})
+	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", serviceEventRandomQueueName( "svc"))
 }
