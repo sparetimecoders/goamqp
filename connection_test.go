@@ -63,7 +63,7 @@ func Test_ConnectToAmqpUrl_Ok(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return mockAmqpConnection, nil
 	}
-	conn := connection{config: AmqpConfig{
+	conn := Connection{config: AmqpConfig{
 		Username:       "user",
 		Password:       "password",
 		Host:           "localhost",
@@ -74,18 +74,18 @@ func Test_ConnectToAmqpUrl_Ok(t *testing.T) {
 	err := conn.connectToAmqpURL()
 	assert.NoError(t, err)
 	assert.Equal(t, mockAmqpConnection, conn.connection)
-	assert.NotNil(t, conn.channel)
+	assert.NotNil(t, conn.Channel)
 }
 
 func Test_ConnectToAmqpUrl_ConnectionFailed(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return nil, errors.New("failure to connect")
 	}
-	conn := connection{}
+	conn := Connection{}
 	err := conn.connectToAmqpURL()
 	assert.Error(t, err)
 	assert.Nil(t, conn.connection)
-	assert.Nil(t, conn.channel)
+	assert.Nil(t, conn.Channel)
 }
 
 func Test_ConnectToAmqpUrl_FailToGetChannel(t *testing.T) {
@@ -93,17 +93,17 @@ func Test_ConnectToAmqpUrl_FailToGetChannel(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return mockAmqpConnection, nil
 	}
-	conn := connection{}
+	conn := Connection{}
 	err := conn.connectToAmqpURL()
 	assert.Error(t, err)
 	assert.Nil(t, conn.connection)
-	assert.Nil(t, conn.channel)
+	assert.Nil(t, conn.Channel)
 }
 
 func Test_FailingSetupFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(func(c *connection) error { return nil }, func(c *connection) error { return fmt.Errorf("error message") })
+	err := conn.Start(func(c *Connection) error { return nil }, func(c *Connection) error { return fmt.Errorf("error message") })
 	assert.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.Test_FailingSetupFunc.func2> failed, error message")
 }
 
