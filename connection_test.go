@@ -221,17 +221,17 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	}
 	channel := MockAmqpChannel{Published: make(chan Publish, 1)}
 
-	handlers := make(map[string]messageHandlerInvoker)
-	msgInvoker := messageHandlerInvoker{
-		eventType: reflect.TypeOf(Message{}),
+	handlers := make(map[string]MessageHandlerInvoker)
+	msgInvoker := MessageHandlerInvoker{
+		EventType: reflect.TypeOf(Message{}),
 		msgHandler: func(i interface{}) bool {
 			return i.(*Message).Ok
 		},
 	}
-	reqResInvoker := messageHandlerInvoker{
-		eventType:        reflect.TypeOf(Message{}),
-		responseExchange: "response",
-		responseHandler: func(i interface{}) (interface{}, bool) {
+	reqResInvoker := MessageHandlerInvoker{
+		EventType:        reflect.TypeOf(Message{}),
+		ResponseExchange: "response",
+		ResponseHandler: func(i interface{}) (interface{}, bool) {
 			return "", i.(*Message).Ok
 		},
 	}
@@ -322,19 +322,19 @@ func testHandleRequestResponse(json string, handled, publishFail bool) (MockAmqp
 		Body:         []byte(json),
 		Acknowledger: &acker,
 	}
-	invoker := messageHandlerInvoker{
-		eventType: reflect.TypeOf(Message{}),
-		responseHandler: func(i2 interface{}) (i interface{}, b bool) {
+	invoker := MessageHandlerInvoker{
+		EventType: reflect.TypeOf(Message{}),
+		ResponseHandler: func(i2 interface{}) (i interface{}, b bool) {
 			return Delayed{}, handled
 		},
 	}
 	if publishFail {
-		invoker.queueRoutingKey = queueRoutingKey{
-			routingKey: "failed",
+		invoker.QueueRoutingKey = QueueRoutingKey{
+			RoutingKey: "failed",
 		}
 	} else {
-		invoker.queueRoutingKey = queueRoutingKey{
-			routingKey: "ok",
+		invoker.QueueRoutingKey = QueueRoutingKey{
+			RoutingKey: "ok",
 		}
 	}
 
@@ -494,27 +494,27 @@ func Test_TransientEventStreamListener_Ok(t *testing.T) {
 	assert.Equal(t, 1, len(channel.QueueDeclarations))
 	assert.Equal(t, QueueDeclaration{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
 
-	assert.Equal(t, 1, len(conn.handlers))
-	key := queueRoutingKey{
-		queue:      "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f",
-		routingKey: "key",
+	assert.Equal(t, 1, len(conn.Handlers))
+	key := QueueRoutingKey{
+		Queue:      "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f",
+		RoutingKey: "key",
 	}
-	invoker := conn.handlers[key]
-	assert.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
-	assert.Equal(t, "key", invoker.routingKey)
-	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", invoker.queue)
-	assert.Equal(t, "", invoker.responseExchange)
-	assert.Equal(t, key, invoker.queueRoutingKey)
+	invoker := conn.Handlers[key]
+	assert.Equal(t, reflect.TypeOf(Message{}), invoker.EventType)
+	assert.Equal(t, "key", invoker.RoutingKey)
+	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", invoker.Queue)
+	assert.Equal(t, "", invoker.ResponseExchange)
+	assert.Equal(t, key, invoker.QueueRoutingKey)
 }
 
 func Test_TransientEventStreamListener_HandlerForRoutingKeyAlreadyExists(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	key := queueRoutingKey{
-		queue:      "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f",
-		routingKey: "key",
+	key := QueueRoutingKey{
+		Queue:      "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f",
+		RoutingKey: "key",
 	}
-	conn.handlers[key] = messageHandlerInvoker{}
+	conn.Handlers[key] = MessageHandlerInvoker{}
 
 	uuid.SetRand(badRand{})
 	err := TransientEventStreamListener("key", func(i interface{}) bool {
