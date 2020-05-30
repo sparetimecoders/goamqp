@@ -110,6 +110,10 @@ type MockAmqpChannel struct {
 	ConfirmCalled            bool
 }
 
+func (m *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
+	panic("implement me")
+}
+
 func (m *MockAmqpChannel) NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation {
 	m.Confirms = &confirm
 	return confirm

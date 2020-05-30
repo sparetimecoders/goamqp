@@ -230,6 +230,7 @@ type AmqpChannel interface {
 	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
 	NotifyClose(c chan *amqp.Error) chan *amqp.Error
 	Confirm(noWait bool) error
+	Qos(prefetchCount, prefetchSize int, global bool) error
 }
 
 var _ AmqpChannel = &amqp.Channel{}
