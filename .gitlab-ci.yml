@@ -39,15 +39,15 @@ stages:
 
 deps:
   stage: deps
-  image: golang:1.12
+  image: golang:1.14
   script:
-    - go get -mod=readonly
+    - go mod download
 
 test:
   stage: test
   dependencies:
     - deps
-  image: golang:1.12
+  image: golang:1.14
   script:
     - go fmt $(go list ./...)
     - go vet $(go list ./...)

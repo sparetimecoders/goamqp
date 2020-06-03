@@ -30,6 +30,20 @@ func Test_Start_MultipleCallsFails(t *testing.T) {
 	assert.EqualError(t, err, "already started")
 }
 
+type Response interface {
+}
+type Request interface {
+}
+type EventStreamListener2 interface {
+	HandleMessage(Response, *Request)
+}
+
+type EventStreamListener2Func func(Response, *Request)
+
+func (f EventStreamListener2Func) HandleMessage(w Response, r *Request) {
+	f(w, r)
+}
+
 func Test_Start_ConnectionFail(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return nil, errors.New("failed to connect")
@@ -184,7 +198,11 @@ func Test_Publish(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	headers := amqp.Table{}
 	headers["key"] = "value"
-	err := publishMessage(channel, Message{true}, "key", "exchange", headers)
+	c := Connection{
+		Channel:       channel,
+		MessageLogger: NopLogger(),
+	}
+	err := c.publishMessage(Message{true}, "key", "exchange", headers)
 	assert.NoError(t, err)
 
 	publish := <-channel.Published
@@ -249,7 +267,12 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	queueDeliveries <- delivery(acker, "missing", true)
 	close(queueDeliveries)
 
-	divertToMessageHandlers(&channel, queueDeliveries, handlers)
+	c := Connection{
+		started:       true,
+		Channel:       &channel,
+		MessageLogger: NopLogger(),
+	}
+	c.divertToMessageHandlers(queueDeliveries, handlers)
 
 	assert.Equal(t, 3, len(acker.Acks))
 	assert.Equal(t, 1, len(acker.Nacks))
@@ -287,9 +310,13 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 		Body:         []byte(json),
 		Acknowledger: &acker,
 	}
-	handleMessage(delivery, func(i interface{}) bool {
+	c := &Connection{
+		MessageLogger: NopLogger(),
+	}
+	c.handleMessage(delivery, func(i interface{}) bool {
 		return handle
-	}, reflect.TypeOf(Message{}))
+	}, reflect.TypeOf(Message{}),
+		"routingkey")
 	return acker
 }
 
@@ -337,8 +364,12 @@ func testHandleRequestResponse(json string, handled, publishFail bool) (MockAmqp
 			RoutingKey: "ok",
 		}
 	}
+	c := &Connection{
+		Channel:       &channel,
+		MessageLogger: NopLogger(),
+	}
 
-	handleRequestResponse(&channel, delivery, invoker)
+	c.handleRequestResponse(delivery, invoker, "r")
 	return channel, acker
 }
 
@@ -379,6 +410,25 @@ func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	assert.EqualError(t, err, e.Error())
 }
 
+func Test_UseMessageLogger(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	logger := &MockLogger{}
+	p := make(chan interface{})
+	_ = conn.Start(
+		UseMessageLogger(logger.logger()),
+		ServicePublisher("service", "routingkey", p, nil, nil),
+	)
+	assert.NotNil(t, conn.MessageLogger)
+
+	p <- TestMessage{"test", true}
+	_ = <-channel.Published
+
+	assert.Equal(t, true, logger.outgoing)
+	assert.Equal(t, "routingkey", logger.routingKey)
+	assert.Equal(t, reflect.TypeOf(TestMessage{}), logger.eventType)
+}
+
 func Test_EventStreamListener(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
@@ -402,7 +452,6 @@ func Test_EventStreamListener(t *testing.T) {
 func Test_ServicePublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-
 	p := make(chan interface{}, 2)
 	err := ServicePublisher("svc", "key", p, nil, nil)(conn)
 	assert.NoError(t, err)
