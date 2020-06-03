@@ -22,7 +22,7 @@ func TestName(t *testing.T) {
 			"key",
 			func(msg interface{}) (interface{}, bool) {
 				assert.Equal(t, &Incoming{Query: "test"}, msg.(*Incoming))
-				return IncomingResponse{Value: "Value",}, true
+				return IncomingResponse{Value: "Value"}, true
 			}, reflect.TypeOf(Incoming{})))
 	if err != nil {
 		log.Fatal(err)

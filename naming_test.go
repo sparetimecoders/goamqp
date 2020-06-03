@@ -38,5 +38,5 @@ func TestServiceResponseQueueName(t *testing.T) {
 
 func TestEventRandomQueueName(t *testing.T) {
 	uuid.SetRand(&badRand{})
-	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", serviceEventRandomQueueName( "svc"))
+	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", serviceEventRandomQueueName("svc"))
 }

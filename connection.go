@@ -51,6 +51,13 @@ func CloseListener(e chan error) Setup {
 	}
 }
 
+func UseMessageLogger(logger MessageLogger) Setup {
+	return func(c *Connection) error {
+		c.MessageLogger = logger
+		return nil
+	}
+}
+
 func TransientEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Setup {
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(c.serviceName)
@@ -162,6 +169,9 @@ func (c *Connection) Start(opts ...Setup) error {
 		return err
 	}
 
+	if c.MessageLogger == nil {
+		c.MessageLogger = NopLogger()
+	}
 	c.started = true
 	return nil
 }
@@ -194,7 +204,7 @@ func (c *Connection) setup() error {
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", q, err)
 		}
-		go divertToMessageHandlers(c.Channel, consumer, queueHandlers)
+		go c.divertToMessageHandlers(consumer, queueHandlers)
 	}
 	return nil
 }
@@ -213,12 +223,13 @@ type MessageHandlerInvoker struct {
 }
 
 type Connection struct {
-	started     bool
-	serviceName string
-	config      AmqpConfig
-	connection  amqpConnection
-	Channel     AmqpChannel
-	Handlers    map[QueueRoutingKey]MessageHandlerInvoker
+	started       bool
+	serviceName   string
+	config        AmqpConfig
+	connection    amqpConnection
+	Channel       AmqpChannel
+	Handlers      map[QueueRoutingKey]MessageHandlerInvoker
+	MessageLogger MessageLogger
 }
 
 type AmqpChannel interface {
@@ -331,7 +342,7 @@ func (c *Connection) publish(p <-chan interface{}, routingKey, exchangeName stri
 	headers := amqp.Table{}
 	headers["service"] = c.serviceName
 	for msg := range p {
-		err := publishMessage(c.Channel, msg, routingKey, exchangeName, headers)
+		err := c.publishMessage(msg, routingKey, exchangeName, headers)
 		if err != nil {
 			fmt.Printf("failed to publish message %+v", msg)
 		}
@@ -379,8 +390,8 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType reflect.
 	return nil
 }
 
-func handleMessage(d amqp.Delivery, handler func(interface{}) bool, eventType reflect.Type) {
-	message, err := parseMessage(d.Body, eventType)
+func (c *Connection) handleMessage(d amqp.Delivery, handler func(interface{}) bool, eventType reflect.Type, routingKey string) {
+	message, err := c.parseMessage(d.Body, eventType, routingKey)
 	if err != nil {
 		_ = d.Reject(false)
 	} else {
@@ -392,16 +403,16 @@ func handleMessage(d amqp.Delivery, handler func(interface{}) bool, eventType re
 	}
 }
 
-func handleRequestResponse(channel AmqpChannel, d amqp.Delivery, invoker MessageHandlerInvoker) {
+func (c *Connection) handleRequestResponse(d amqp.Delivery, invoker MessageHandlerInvoker, routingKey string) {
 	handler := invoker.ResponseHandler
-	message, err := parseMessage(d.Body, invoker.EventType)
+	message, err := c.parseMessage(d.Body, invoker.EventType, routingKey)
 	if err != nil {
 		_ = d.Reject(false)
 	} else {
 		if response, success := handler(message); success {
 			headers := amqp.Table{}
 			headers["service"] = d.Headers["service"]
-			if err := publishMessage(channel, response, invoker.RoutingKey, invoker.ResponseExchange, headers); err != nil {
+			if err := c.publishMessage(response, invoker.RoutingKey, invoker.ResponseExchange, headers); err != nil {
 				_ = d.Nack(false, false)
 			} else {
 				_ = d.Ack(false)
@@ -412,7 +423,8 @@ func handleRequestResponse(channel AmqpChannel, d amqp.Delivery, invoker Message
 	}
 }
 
-func parseMessage(jsonContent []byte, eventType reflect.Type) (interface{}, error) {
+func (c *Connection) parseMessage(jsonContent []byte, eventType reflect.Type, routingKey string) (interface{}, error) {
+	c.MessageLogger(jsonContent, eventType, routingKey, false)
 	target := reflect.New(eventType).Interface()
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
 		return nil, err
@@ -421,11 +433,13 @@ func parseMessage(jsonContent []byte, eventType reflect.Type) (interface{}, erro
 	return target, nil
 }
 
-func publishMessage(channel AmqpChannel, msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
+func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
+
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
+	c.MessageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
 
 	if dm, ok := msg.(DelayedMessage); ok {
 		headers["x-delay"] = fmt.Sprintf("%.0f", dm.TTL().Seconds()*1000)
@@ -438,7 +452,7 @@ func publishMessage(channel AmqpChannel, msg interface{}, routingKey, exchangeNa
 		Headers:      headers,
 	}
 
-	return channel.Publish(exchangeName,
+	return c.Channel.Publish(exchangeName,
 		routingKey,
 		false,
 		false,
@@ -446,13 +460,13 @@ func publishMessage(channel AmqpChannel, msg interface{}, routingKey, exchangeNa
 	)
 }
 
-func divertToMessageHandlers(channel AmqpChannel, deliveries <-chan amqp.Delivery, handlers map[string]MessageHandlerInvoker) {
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]MessageHandlerInvoker) {
 	for d := range deliveries {
 		if h, ok := handlers[d.RoutingKey]; ok {
 			if h.ResponseExchange != "" {
-				handleRequestResponse(channel, d, h)
+				c.handleRequestResponse(d, h, d.RoutingKey)
 			} else {
-				handleMessage(d, h.msgHandler, h.EventType)
+				c.handleMessage(d, h.msgHandler, h.EventType, d.RoutingKey)
 			}
 		} else {
 			// Unhandled message
