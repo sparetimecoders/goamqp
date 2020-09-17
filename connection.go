@@ -21,22 +21,11 @@ type DelayedMessage interface {
 	TTL() time.Duration
 }
 
-type Config func(cfg *AmqpConfig)
-
-func WithDelayedMessaging() Config {
-	return func(cfg *AmqpConfig) {
-		cfg.DelayedMessage = true
-	}
-}
-
 // NewFromURL creates a new Connection from an URL
-func NewFromURL(serviceName string, amqpURL string, opts ...Config) (*Connection, error) {
+func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
 	amqpConfig, err := ParseAmqpURL(amqpURL)
 	if err != nil {
 		return nil, err
-	}
-	for _, opt := range opts {
-		opt(&amqpConfig)
 	}
 	return newConnection(serviceName, amqpConfig), nil
 }
@@ -65,6 +54,13 @@ func CloseListener(e chan error) Setup {
 func UseMessageLogger(logger MessageLogger) Setup {
 	return func(c *Connection) error {
 		c.MessageLogger = logger
+		return nil
+	}
+}
+
+func WithDelayedMessaging() Setup {
+	return func(conn *Connection) error {
+		conn.config.DelayedMessage = true
 		return nil
 	}
 }
@@ -171,8 +167,14 @@ func (c *Connection) Start(opts ...Setup) error {
 	}
 
 	for _, f := range opts {
+		if GetFuncName(f) == "gitlab.com/sparetimecoders/goamqp.WithDelayedMessaging.func1" {
+			_ = f(c)
+		}
+	}
+
+	for _, f := range opts {
 		if err := f(c); err != nil {
-			return fmt.Errorf("setup function <%s> failed, %v", runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), err)
+			return fmt.Errorf("setup function <%s> failed, %v", GetFuncName(f), err)
 		}
 	}
 
@@ -185,6 +187,10 @@ func (c *Connection) Start(opts ...Setup) error {
 	}
 	c.started = true
 	return nil
+}
+
+func GetFuncName(f Setup) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
 func (c *Connection) Close() error {
