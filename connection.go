@@ -21,11 +21,22 @@ type DelayedMessage interface {
 	TTL() time.Duration
 }
 
+type Config func(cfg *AmqpConfig)
+
+func WithDelayedMessaging() Config {
+	return func(cfg *AmqpConfig) {
+		cfg.DelayedMessage = true
+	}
+}
+
 // NewFromURL creates a new Connection from an URL
-func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
+func NewFromURL(serviceName string, amqpURL string, opts ...Config) (*Connection, error) {
 	amqpConfig, err := ParseAmqpURL(amqpURL)
 	if err != nil {
 		return nil, err
+	}
+	for _, opt := range opts {
+		opt(&amqpConfig)
 	}
 	return newConnection(serviceName, amqpConfig), nil
 }

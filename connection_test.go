@@ -133,6 +133,13 @@ func Test_NewFromURL_ValidURL(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func Test_NewFromURL_DelayedMessaging(t *testing.T) {
+	c, err := NewFromURL("test", "amqp://user:password@localhost:5672/", WithDelayedMessaging())
+	assert.NotNil(t, c)
+	assert.NoError(t, err)
+	assert.True(t, c.config.DelayedMessage)
+}
+
 func Test_NewFromConfig(t *testing.T) {
 	config, err := ParseAmqpURL("amqp://user:password@localhost:5672/")
 	assert.NoError(t, err)
