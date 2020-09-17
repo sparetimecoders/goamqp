@@ -58,6 +58,13 @@ func UseMessageLogger(logger MessageLogger) Setup {
 	}
 }
 
+func WithDelayedMessaging() Setup {
+	return func(conn *Connection) error {
+		conn.config.DelayedMessage = true
+		return nil
+	}
+}
+
 func TransientEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Setup {
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(c.serviceName)
@@ -160,8 +167,14 @@ func (c *Connection) Start(opts ...Setup) error {
 	}
 
 	for _, f := range opts {
+		if GetFuncName(f) == "gitlab.com/sparetimecoders/goamqp.WithDelayedMessaging.func1" {
+			_ = f(c)
+		}
+	}
+
+	for _, f := range opts {
 		if err := f(c); err != nil {
-			return fmt.Errorf("setup function <%s> failed, %v", runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), err)
+			return fmt.Errorf("setup function <%s> failed, %v", GetFuncName(f), err)
 		}
 	}
 
@@ -174,6 +187,10 @@ func (c *Connection) Start(opts ...Setup) error {
 	}
 	c.started = true
 	return nil
+}
+
+func GetFuncName(f Setup) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
 func (c *Connection) Close() error {

@@ -30,6 +30,23 @@ func Test_Start_MultipleCallsFails(t *testing.T) {
 	assert.EqualError(t, err, "already started")
 }
 
+func Test_Start_WithDelayedMessaging_Runs_First(t *testing.T) {
+	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
+	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
+		return mockAmqpConnection, nil
+	}
+	conn, err := NewFromURL("", "amqp://user:password@localhost:67333/a")
+	assert.NoError(t, err)
+	err = conn.Start(
+		func(conn *Connection) error {
+			assert.True(t, conn.config.DelayedMessage)
+			return nil
+		},
+		WithDelayedMessaging(),
+	)
+	assert.NoError(t, err)
+}
+
 type Response interface {
 }
 type Request interface {
