@@ -463,7 +463,11 @@ func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName st
 	c.MessageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
 
 	if dm, ok := msg.(DelayedMessage); ok {
-		headers["x-delay"] = fmt.Sprintf("%.0f", dm.TTL().Seconds()*1000)
+		delayMillis := dm.TTL().Seconds() * 1000
+		if delayMillis > DelayMaxMillis {
+			fmt.Printf("delay time value for type %s is too large, please check your code", reflect.TypeOf(msg))
+		}
+		headers["x-delay"] = fmt.Sprintf("%.0f", delayMillis)
 	}
 
 	publishing := amqp.Publishing{
