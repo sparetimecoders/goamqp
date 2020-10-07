@@ -40,7 +40,7 @@ type AmqpConfig struct {
 
 // ParseAmqpURL tries to parse the passed string and create a valid AmqpConfig object
 func ParseAmqpURL(amqpURL string) (AmqpConfig, error) {
-	var amqpConnectionRegex = regexp.MustCompile(`(?:amqp:\/\/)?(?P<Username>.*):(?P<Password>.*?)@(?P<Host>.*?)(?:\:(?P<Port>\d*))?(?:\/(?P<VHost>.*))?$`)
+	var amqpConnectionRegex = regexp.MustCompile(`(?:amqp(s?):\/\/)?(?P<Username>.*):(?P<Password>.*?)@(?P<Host>.*?)(?:\:(?P<Port>\d*))?(?:\/(?P<VHost>.*))?$`)
 	if amqpConnectionRegex.MatchString(amqpURL) {
 		return validateConfig(*convertToAmqpConfig(mapValues(amqpConnectionRegex, amqpConnectionRegex.FindStringSubmatch(amqpURL))))
 	}
