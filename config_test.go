@@ -38,6 +38,20 @@ func TestParseValidUrl(t *testing.T) {
 	},
 		c)
 }
+
+func TestParseValidAMQPSUrl(t *testing.T) {
+	c, err := ParseAmqpURL("amqps://user:password@localhost:67333/a")
+	assert.NoError(t, err)
+	assert.EqualValues(t, AmqpConfig{
+		Username: "user",
+		Password: "password",
+		Host:     "localhost",
+		Port:     67333,
+		VHost:    "a",
+	},
+		c)
+}
+
 func TestParseValidUrlWithDefaults(t *testing.T) {
 	c, err := ParseAmqpURL("user:password@localhost")
 	assert.NoError(t, err)
