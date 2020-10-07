@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"io"
+	"math"
 	"os"
 	"reflect"
 	"runtime"
@@ -18,8 +19,11 @@ import (
 // The delayed messaging plugin must be installed on the RabbitMQ server to enable this functionality.
 // https://github.com/rabbitmq/rabbitmq-delayed-message-exchange
 type DelayedMessage interface {
+	// The delay time in milliseconds. Please note that the maximum delay time is 2^32-1 milliseconds
 	TTL() time.Duration
 }
+
+const DelayMaxMillis = math.MaxUint32
 
 // NewFromURL creates a new Connection from an URL
 func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
