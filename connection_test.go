@@ -446,6 +446,28 @@ func Test_UseMessageLogger(t *testing.T) {
 	assert.Equal(t, reflect.TypeOf(TestMessage{}), logger.eventType)
 }
 
+func Test_UseMessageLogger_Nil(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	p := make(chan interface{})
+	err := conn.Start(
+		UseMessageLogger(nil),
+		ServicePublisher("service", "routingkey", p, nil, nil),
+	)
+	assert.Error(t, err)
+}
+
+func Test_UseMessageLogger_Default(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	p := make(chan interface{})
+	err := conn.Start(
+		ServicePublisher("service", "routingkey", p, nil, nil),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, conn.MessageLogger)
+}
+
 func Test_EventStreamListener(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)

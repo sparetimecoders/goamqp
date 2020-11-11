@@ -57,6 +57,9 @@ func CloseListener(e chan error) Setup {
 
 func UseMessageLogger(logger MessageLogger) Setup {
 	return func(c *Connection) error {
+		if logger == nil {
+			return errors.New("cannot use nil as MessageLogger")
+		}
 		c.MessageLogger = logger
 		return nil
 	}
@@ -162,6 +165,7 @@ func (c *Connection) Start(opts ...Setup) error {
 	if c.started {
 		return fmt.Errorf("already started")
 	}
+	c.MessageLogger = NopLogger()
 
 	if c.Channel == nil {
 		err := c.connectToAmqpURL()
@@ -186,9 +190,6 @@ func (c *Connection) Start(opts ...Setup) error {
 		return err
 	}
 
-	if c.MessageLogger == nil {
-		c.MessageLogger = NopLogger()
-	}
 	c.started = true
 	return nil
 }
