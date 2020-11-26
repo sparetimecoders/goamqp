@@ -90,16 +90,6 @@ func TransientEventStreamListener(routingKey string, handler func(interface{}) b
 	}
 }
 
-func EventStreamPublisher(routingKey string, publisher chan interface{}) Setup {
-	return func(c *Connection) error {
-		if err := c.exchangeDeclare(c.Channel, eventsExchangeName(), "topic"); err != nil {
-			return err
-		}
-		go c.publish(publisher, routingKey, eventsExchangeName())
-		return nil
-	}
-}
-
 func EventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Setup {
 	return func(c *Connection) error {
 		queueName := serviceEventQueueName(c.serviceName)
@@ -109,24 +99,25 @@ func EventStreamListener(routingKey string, handler func(interface{}) bool, even
 	}
 }
 
-func ServicePublisher(targetService, routingKey string, publisher chan interface{}, handler func(interface{}) bool, eventType reflect.Type) Setup {
+func EventStreamPublisher(publisher *Publisher) Setup {
 	return func(c *Connection) error {
-		if handler != nil {
-			resQueueName := serviceResponseQueueName(targetService, c.serviceName)
-			resExchangeName := serviceResponseExchangeName(targetService)
-
-			if err := c.messageHandlerBindQueueToExchange(resQueueName, resExchangeName, routingKey, "headers", handler, eventType, amqp.Table{"x-match": "all"}); err != nil {
-				return err
-			}
+		if err := c.exchangeDeclare(c.Channel, eventsExchangeName(), "topic"); err != nil {
+			return err
 		}
+		publisher.connection = c
+		publisher.exchange = eventsExchangeName()
+		return nil
+	}
+}
 
+func ServicePublisher(targetService string, publisher *Publisher) Setup {
+	return func(c *Connection) error {
 		reqExchangeName := serviceRequestExchangeName(targetService)
-
+		publisher.connection = c
+		publisher.exchange = reqExchangeName
 		if err := c.exchangeDeclare(c.Channel, reqExchangeName, "direct"); err != nil {
 			return err
 		}
-		go c.publish(publisher, routingKey, reqExchangeName)
-
 		return nil
 	}
 }
@@ -151,6 +142,43 @@ func RequestResponseHandler(routingKey string, handler func(interface{}) (interf
 			return err
 		}
 		return c.Channel.QueueBind(reqQueueName, routingKey, reqExchangeName, false, amqp.Table{})
+	}
+}
+
+// NewPublisher returns a publisher that can be used to send messages
+func NewPublisher(routes Routes) *Publisher {
+	r := make(map[reflect.Type]string)
+	for msg, routingKey := range routes {
+		r[reflect.TypeOf(msg)] = routingKey
+	}
+
+	return &Publisher{
+		typeToRoutingKey: r,
+	}
+}
+
+type Routes map[interface{}]string
+
+// Publisher is used to send messages
+type Publisher struct {
+	connection       *Connection
+	exchange         string
+	typeToRoutingKey routes
+}
+
+// Publish publishes a message to a given topic
+func (p *Publisher) Publish(msg interface{}) error {
+	headers := amqp.Table{}
+	headers["service"] = p.connection.serviceName
+	t := reflect.TypeOf(msg)
+	key := t
+	if t.Kind() == reflect.Ptr {
+		key = t.Elem()
+	}
+	if key, ok := p.typeToRoutingKey[key]; ok {
+		return p.connection.publishMessage(msg, key, p.exchange, headers)
+	} else {
+		return fmt.Errorf("no routingkey configured for message of type %s", t)
 	}
 }
 
@@ -230,6 +258,8 @@ func (c *Connection) setup() error {
 	}
 	return nil
 }
+
+type routes map[reflect.Type]string
 
 type QueueRoutingKey struct {
 	Queue      string

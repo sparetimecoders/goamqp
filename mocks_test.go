@@ -189,8 +189,8 @@ func (m *MockAmqpConnection) Channel() (*amqp.Channel, error) {
 
 func NewMockAmqpChannel() *MockAmqpChannel {
 	return &MockAmqpChannel{
-		Published: make(chan Publish, 2),
-		Delivery:  make(chan amqp.Delivery, 2),
+		Published: make(chan Publish, 3),
+		Delivery:  make(chan amqp.Delivery, 3),
 	}
 }
 

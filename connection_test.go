@@ -393,8 +393,8 @@ func testHandleRequestResponse(json string, handled, publishFail bool) (MockAmqp
 func Test_EventStreamPublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := make(chan interface{}, 2)
-	err := EventStreamPublisher("key", p)(conn)
+	p := NewPublisher(Routes{TestMessage{}: "key", DelayedTestMessage{}: "key"})
+	err := EventStreamPublisher(p)(conn)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -403,12 +403,12 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 	assert.Equal(t, 0, len(channel.QueueDeclarations))
 	assert.Equal(t, 0, len(channel.BindingDeclarations))
 
-	p <- TestMessage{"test", true}
+	p.Publish(TestMessage{"test", true})
 
 	published := <-channel.Published
 	assert.Equal(t, "key", published.key)
 
-	p <- DelayedTestMessage{"test"}
+	p.Publish(DelayedTestMessage{"test"})
 	published = <-channel.Published
 
 	assert.Equal(t, 2, len(published.msg.Headers))
@@ -419,10 +419,10 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := make(chan interface{}, 2)
+	p := NewPublisher(Routes{TestMessage{}: "key"})
 	e := errors.New("failed to create exchange")
 	channel.ExchangeDeclarationError = &e
-	err := EventStreamPublisher("key", p)(conn)
+	err := EventStreamPublisher(p)(conn)
 	assert.Error(t, err)
 	assert.EqualError(t, err, e.Error())
 }
@@ -431,14 +431,15 @@ func Test_UseMessageLogger(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	logger := &MockLogger{}
-	p := make(chan interface{})
+	p := NewPublisher(Routes{TestMessage{}: "routingkey"})
 	_ = conn.Start(
 		UseMessageLogger(logger.logger()),
-		ServicePublisher("service", "routingkey", p, nil, nil),
+		ServicePublisher("service", p),
 	)
 	assert.NotNil(t, conn.MessageLogger)
 
-	p <- TestMessage{"test", true}
+	err := p.Publish(TestMessage{"test", true})
+	assert.NoError(t, err)
 	_ = <-channel.Published
 
 	assert.Equal(t, true, logger.outgoing)
@@ -449,10 +450,10 @@ func Test_UseMessageLogger(t *testing.T) {
 func Test_UseMessageLogger_Nil(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := make(chan interface{})
+	p := NewPublisher(Routes{TestMessage{}: "routingkey"})
 	err := conn.Start(
 		UseMessageLogger(nil),
-		ServicePublisher("service", "routingkey", p, nil, nil),
+		ServicePublisher("service", p),
 	)
 	assert.Error(t, err)
 }
@@ -460,9 +461,9 @@ func Test_UseMessageLogger_Nil(t *testing.T) {
 func Test_UseMessageLogger_Default(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := make(chan interface{})
+	p := NewPublisher(Routes{TestMessage{}: "routingkey"})
 	err := conn.Start(
-		ServicePublisher("service", "routingkey", p, nil, nil),
+		ServicePublisher("service", p),
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, conn.MessageLogger)
@@ -491,8 +492,9 @@ func Test_EventStreamListener(t *testing.T) {
 func Test_ServicePublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := make(chan interface{}, 2)
-	err := ServicePublisher("svc", "key", p, nil, nil)(conn)
+	p := NewPublisher(Routes{TestMessage{}: "key"})
+
+	err := ServicePublisher("svc", p)(conn)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -501,10 +503,61 @@ func Test_ServicePublisher_Ok(t *testing.T) {
 	assert.Equal(t, 0, len(channel.QueueDeclarations))
 	assert.Equal(t, 0, len(channel.BindingDeclarations))
 
-	p <- TestMessage{"test", true}
+	err = p.Publish(TestMessage{"test", true})
+	assert.NoError(t, err)
 	published := <-channel.Published
 	assert.Equal(t, "key", published.key)
 	assert.Equal(t, "svc.direct.exchange.request", published.exchange)
+}
+
+func Test_ServicePublisher_Multiple(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	p := NewPublisher(Routes{TestMessage{}: "key", DelayedTestMessage{}: "key2"})
+
+	err := ServicePublisher("svc", p)(conn)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+
+	assert.Equal(t, 0, len(channel.QueueDeclarations))
+	assert.Equal(t, 0, len(channel.BindingDeclarations))
+
+	err = p.Publish(TestMessage{"test", true})
+	assert.NoError(t, err)
+	err = p.Publish(DelayedTestMessage{"delayed"})
+	assert.NoError(t, err)
+	err = p.Publish(TestMessage{"test2", false})
+	assert.NoError(t, err)
+	published := <-channel.Published
+	assert.Equal(t, "key", published.key)
+	assert.Equal(t, "svc.direct.exchange.request", published.exchange)
+	published = <-channel.Published
+	assert.Equal(t, "key2", published.key)
+	assert.Equal(t, "svc.direct.exchange.request", published.exchange)
+	published = <-channel.Published
+	assert.Equal(t, "key", published.key)
+	assert.Equal(t, "{\"Msg\":\"test2\",\"Success\":false}", string(published.msg.Body))
+
+}
+
+func Test_ServicePublisher_NoMatchingRoute(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	p := NewPublisher(Routes{TestMessage{}: "key"})
+
+	err := ServicePublisher("svc", p)(conn)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 1, len(channel.ExchangeDeclarations))
+	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[0])
+
+	assert.Equal(t, 0, len(channel.QueueDeclarations))
+	assert.Equal(t, 0, len(channel.BindingDeclarations))
+
+	err = p.Publish(&DelayedTestMessage{"test"})
+	assert.EqualError(t, err, "no routingkey configured for message of type *goamqp.DelayedTestMessage")
 }
 
 func Test_ServicePublisher_ExchangeDeclareFail(t *testing.T) {
@@ -513,36 +566,10 @@ func Test_ServicePublisher_ExchangeDeclareFail(t *testing.T) {
 	channel.ExchangeDeclarationError = &e
 	conn := mockConnection(channel)
 
-	p := make(chan interface{}, 2)
-	err := ServicePublisher("svc", "key", p, nil, nil)(conn)
+	p := NewPublisher(Routes{TestMessage{}: "key"})
+	err := ServicePublisher("svc", p)(conn)
 	assert.Error(t, err)
 	assert.EqualError(t, err, e.Error())
-}
-
-func Test_ServicePublisherResponseHandler_Ok(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-
-	p := make(chan interface{}, 2)
-	err := ServicePublisher("svc", "key", p, func(i interface{}) bool {
-		return true
-	}, reflect.TypeOf(Message{}))(conn)
-	assert.NoError(t, err)
-
-	assert.Equal(t, 2, len(channel.ExchangeDeclarations))
-	assert.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", kind: "x-delayed-message", durable: true, autoDelete: false, internal: false, noWait: false, args: amqp.Table{"x-delayed-type": "headers"}}, channel.ExchangeDeclarations[0])
-	assert.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, args: amqp.Table{"x-delayed-type": "direct"}, kind: "x-delayed-message"}, channel.ExchangeDeclarations[1])
-
-	assert.Equal(t, 1, len(channel.QueueDeclarations))
-	assert.Equal(t, QueueDeclaration{name: "svc.headers.exchange.response.queue.svc", durable: true, autoDelete: false, noWait: false, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
-
-	assert.Equal(t, 1, len(channel.BindingDeclarations))
-	assert.Equal(t, BindingDeclaration{queue: "svc.headers.exchange.response.queue.svc", key: "key", exchange: "svc.headers.exchange.response", noWait: false, args: amqp.Table{"x-match": "all"}}, channel.BindingDeclarations[0])
-
-	p <- TestMessage{"test", true}
-	published := <-channel.Published
-	assert.Equal(t, "key", published.key)
-	assert.Equal(t, "svc.direct.exchange.request", published.exchange)
 }
 
 func Test_RequestResponseHandler(t *testing.T) {
