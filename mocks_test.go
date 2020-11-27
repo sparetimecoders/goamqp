@@ -182,15 +182,14 @@ func (m *MockAmqpConnection) Close() error {
 func (m *MockAmqpConnection) Channel() (*amqp.Channel, error) {
 	if m.ChannelConnected {
 		return &amqp.Channel{}, nil
-	} else {
-		return nil, errors.New("failed to get channel")
 	}
+	return nil, errors.New("failed to get channel")
 }
 
 func NewMockAmqpChannel() *MockAmqpChannel {
 	return &MockAmqpChannel{
-		Published: make(chan Publish, 2),
-		Delivery:  make(chan amqp.Delivery, 2),
+		Published: make(chan Publish, 3),
+		Delivery:  make(chan amqp.Delivery, 3),
 	}
 }
 
@@ -207,9 +206,9 @@ var _ AmqpChannel = &MockAmqpChannel{}
 
 func mockConnection(channel *MockAmqpChannel) *Connection {
 	c := newConnection("svc", AmqpConfig{DelayedMessage: true})
-	c.Channel = channel
+	c.channel = channel
 	c.connection = &MockAmqpConnection{}
-	c.MessageLogger = NopLogger()
+	c.messageLogger = NopLogger()
 	return c
 }
 

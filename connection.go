@@ -23,6 +23,7 @@ type DelayedMessage interface {
 	TTL() time.Duration
 }
 
+// DelayMaxMillis is the longest delay allowed by the RabbitMQ Delayed Message plugin
 const DelayMaxMillis = math.MaxUint32
 
 // NewFromURL creates a new Connection from an URL
@@ -39,8 +40,11 @@ func New(serviceName string, config AmqpConfig) *Connection {
 	return newConnection(serviceName, config)
 }
 
+// Setup is a setup function that takes a Connection and use it to setup AMQP
+// An example is to create exchanges and queues
 type Setup func(conn *Connection) error
 
+// CloseListener revieces a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {
 	return func(c *Connection) error {
 		temp := make(chan *amqp.Error)
@@ -50,21 +54,23 @@ func CloseListener(e chan error) Setup {
 				e <- errors.New(ev.Error())
 			}
 		}()
-		c.Channel.NotifyClose(temp)
+		c.channel.NotifyClose(temp)
 		return nil
 	}
 }
 
+// UseMessageLogger allows a MessageLogger to be used when log in/outgoing messages
 func UseMessageLogger(logger MessageLogger) Setup {
 	return func(c *Connection) error {
 		if logger == nil {
 			return errors.New("cannot use nil as MessageLogger")
 		}
-		c.MessageLogger = logger
+		c.messageLogger = logger
 		return nil
 	}
 }
 
+// WithDelayedMessaging configures exchanges to accept delayed messages
 func WithDelayedMessaging() Setup {
 	return func(conn *Connection) error {
 		conn.config.DelayedMessage = true
@@ -72,6 +78,7 @@ func WithDelayedMessaging() Setup {
 	}
 }
 
+// TransientEventStreamListener sets up ap a event stream listener that will get removed when the channel is closed
 func TransientEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Setup {
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(c.serviceName)
@@ -80,26 +87,17 @@ func TransientEventStreamListener(routingKey string, handler func(interface{}) b
 			return err
 		}
 
-		if err := c.exchangeDeclare(c.Channel, exchangeName, "topic"); err != nil {
+		if err := c.exchangeDeclare(c.channel, exchangeName, "topic"); err != nil {
 			return err
 		}
-		if err := transientQueueDeclare(c.Channel, queueName); err != nil {
+		if err := transientQueueDeclare(c.channel, queueName); err != nil {
 			return err
 		}
-		return c.Channel.QueueBind(queueName, routingKey, exchangeName, false, amqp.Table{})
+		return c.channel.QueueBind(queueName, routingKey, exchangeName, false, amqp.Table{})
 	}
 }
 
-func EventStreamPublisher(routingKey string, publisher chan interface{}) Setup {
-	return func(c *Connection) error {
-		if err := c.exchangeDeclare(c.Channel, eventsExchangeName(), "topic"); err != nil {
-			return err
-		}
-		go c.publish(publisher, routingKey, eventsExchangeName())
-		return nil
-	}
-}
-
+// EventStreamListener sets up ap a durable, persistent event stream listener
 func EventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Setup {
 	return func(c *Connection) error {
 		queueName := serviceEventQueueName(c.serviceName)
@@ -109,28 +107,32 @@ func EventStreamListener(routingKey string, handler func(interface{}) bool, even
 	}
 }
 
-func ServicePublisher(targetService, routingKey string, publisher chan interface{}, handler func(interface{}) bool, eventType reflect.Type) Setup {
+// EventStreamPublisher sets up ap a event stream publisher
+func EventStreamPublisher(publisher *Publisher) Setup {
 	return func(c *Connection) error {
-		if handler != nil {
-			resQueueName := serviceResponseQueueName(targetService, c.serviceName)
-			resExchangeName := serviceResponseExchangeName(targetService)
-
-			if err := c.messageHandlerBindQueueToExchange(resQueueName, resExchangeName, routingKey, "headers", handler, eventType, amqp.Table{"x-match": "all"}); err != nil {
-				return err
-			}
-		}
-
-		reqExchangeName := serviceRequestExchangeName(targetService)
-
-		if err := c.exchangeDeclare(c.Channel, reqExchangeName, "direct"); err != nil {
+		if err := c.exchangeDeclare(c.channel, eventsExchangeName(), "topic"); err != nil {
 			return err
 		}
-		go c.publish(publisher, routingKey, reqExchangeName)
-
+		publisher.connection = c
+		publisher.exchange = eventsExchangeName()
 		return nil
 	}
 }
 
+// ServicePublisher sets up ap a service publisher
+func ServicePublisher(targetService string, publisher *Publisher) Setup {
+	return func(c *Connection) error {
+		reqExchangeName := serviceRequestExchangeName(targetService)
+		publisher.connection = c
+		publisher.exchange = reqExchangeName
+		if err := c.exchangeDeclare(c.channel, reqExchangeName, "direct"); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+// RequestResponseHandler sets up ap a service stream listener
 func RequestResponseHandler(routingKey string, handler func(interface{}) (interface{}, bool), eventType reflect.Type) Setup {
 	return func(c *Connection) error {
 		reqExchangeName := serviceRequestExchangeName(c.serviceName)
@@ -141,33 +143,72 @@ func RequestResponseHandler(routingKey string, handler func(interface{}) (interf
 			return err
 		}
 
-		if err := c.exchangeDeclare(c.Channel, resExchangeName, "headers"); err != nil {
+		if err := c.exchangeDeclare(c.channel, resExchangeName, "headers"); err != nil {
 			return err
 		}
-		if err := c.exchangeDeclare(c.Channel, reqExchangeName, "direct"); err != nil {
+		if err := c.exchangeDeclare(c.channel, reqExchangeName, "direct"); err != nil {
 			return err
 		}
-		if err := queueDeclare(c.Channel, reqQueueName); err != nil {
+		if err := queueDeclare(c.channel, reqQueueName); err != nil {
 			return err
 		}
-		return c.Channel.QueueBind(reqQueueName, routingKey, reqExchangeName, false, amqp.Table{})
+		return c.channel.QueueBind(reqQueueName, routingKey, reqExchangeName, false, amqp.Table{})
 	}
 }
 
+// NewPublisher returns a publisher that can be used to send messages
+func NewPublisher(routes Routes) *Publisher {
+	r := make(map[reflect.Type]string)
+	for msg, routingKey := range routes {
+		r[reflect.TypeOf(msg)] = routingKey
+	}
+
+	return &Publisher{
+		typeToRoutingKey: r,
+	}
+}
+
+// Routes defines the routekey to be used for a message type
+type Routes map[interface{}]string
+
+// Publisher is used to send messages
+type Publisher struct {
+	connection       *Connection
+	exchange         string
+	typeToRoutingKey routes
+}
+
+// Publish publishes a message to a given topic
+func (p *Publisher) Publish(msg interface{}) error {
+	headers := amqp.Table{}
+	headers["service"] = p.connection.serviceName
+	t := reflect.TypeOf(msg)
+	key := t
+	if t.Kind() == reflect.Ptr {
+		key = t.Elem()
+	}
+	if key, ok := p.typeToRoutingKey[key]; ok {
+		return p.connection.publishMessage(msg, key, p.exchange, headers)
+	}
+	return fmt.Errorf("no routingkey configured for message of type %s", t)
+}
+
+// PublishNotify see amqp.Channel.Confirm
 func PublishNotify(confirm chan amqp.Confirmation) Setup {
 	return func(c *Connection) error {
-		c.Channel.NotifyPublish(confirm)
-		return c.Channel.Confirm(false)
+		c.channel.NotifyPublish(confirm)
+		return c.channel.Confirm(false)
 	}
 }
 
+// Start setups the amqp queues and exchanges defined by opts
 func (c *Connection) Start(opts ...Setup) error {
 	if c.started {
 		return fmt.Errorf("already started")
 	}
-	c.MessageLogger = NopLogger()
+	c.messageLogger = NopLogger()
 
-	if c.Channel == nil {
+	if c.channel == nil {
 		err := c.connectToAmqpURL()
 		if err != nil {
 			return err
@@ -175,14 +216,14 @@ func (c *Connection) Start(opts ...Setup) error {
 	}
 
 	for _, f := range opts {
-		if GetFuncName(f) == "gitlab.com/sparetimecoders/goamqp.WithDelayedMessaging.func1" {
+		if getFuncName(f) == "gitlab.com/sparetimecoders/goamqp.WithDelayedMessaging.func1" {
 			_ = f(c)
 		}
 	}
 
 	for _, f := range opts {
 		if err := f(c); err != nil {
-			return fmt.Errorf("setup function <%s> failed, %v", GetFuncName(f), err)
+			return fmt.Errorf("setup function <%s> failed, %v", getFuncName(f), err)
 		}
 	}
 
@@ -194,10 +235,11 @@ func (c *Connection) Start(opts ...Setup) error {
 	return nil
 }
 
-func GetFuncName(f Setup) string {
+func getFuncName(f Setup) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
+// Close closes the amqp connection, see amqp.Connection.Close
 func (c *Connection) Close() error {
 	return c.connection.Close()
 }
@@ -206,23 +248,23 @@ func newConnection(serviceName string, config AmqpConfig) *Connection {
 	return &Connection{
 		serviceName: serviceName,
 		config:      config,
-		Handlers:    make(map[QueueRoutingKey]MessageHandlerInvoker),
+		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
 	}
 }
 
 func (c *Connection) setup() error {
-	queues := make(map[string][]MessageHandlerInvoker)
+	queues := make(map[string][]messageHandlerInvoker)
 
-	for qr, h := range c.Handlers {
+	for qr, h := range c.handlers {
 		queues[qr.Queue] = append(queues[qr.Queue], h)
 	}
 
 	for q, h := range queues {
-		queueHandlers := make(map[string]MessageHandlerInvoker)
+		queueHandlers := make(map[string]messageHandlerInvoker)
 		for _, kh := range h {
 			queueHandlers[kh.RoutingKey] = kh
 		}
-		consumer, err := consume(c.Channel, q)
+		consumer, err := consume(c.channel, q)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", q, err)
 		}
@@ -231,29 +273,33 @@ func (c *Connection) setup() error {
 	return nil
 }
 
-type QueueRoutingKey struct {
+type routes map[reflect.Type]string
+
+type queueRoutingKey struct {
 	Queue      string
 	RoutingKey string
 }
 
-type MessageHandlerInvoker struct {
+type messageHandlerInvoker struct {
 	msgHandler       func(interface{}) bool
 	ResponseHandler  func(interface{}) (interface{}, bool)
 	ResponseExchange string
-	QueueRoutingKey
+	queueRoutingKey
 	EventType reflect.Type
 }
 
+// Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
 	started       bool
 	serviceName   string
 	config        AmqpConfig
 	connection    amqpConnection
-	Channel       AmqpChannel
-	Handlers      map[QueueRoutingKey]MessageHandlerInvoker
-	MessageLogger MessageLogger
+	channel       AmqpChannel
+	handlers      map[queueRoutingKey]messageHandlerInvoker
+	messageLogger MessageLogger
 }
 
+// AmqpChannel wraps the amqp.Channel to allow for mocking
 type AmqpChannel interface {
 	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
@@ -336,11 +382,11 @@ func amqpConfig(serviceName string) amqp.Config {
 }
 
 func hostName() string {
-	if hostname, err := os.Hostname(); err != nil {
+	hostname, err := os.Hostname()
+	if err != nil {
 		return "_unknown_"
-	} else {
-		return hostname
 	}
+	return hostname
 }
 
 func (c *Connection) connectToAmqpURL() error {
@@ -355,20 +401,9 @@ func (c *Connection) connectToAmqpURL() error {
 		return err
 	}
 
-	c.Channel = ch
+	c.channel = ch
 	c.connection = conn
 	return nil
-}
-
-func (c *Connection) publish(p <-chan interface{}, routingKey, exchangeName string) {
-	headers := amqp.Table{}
-	headers["service"] = c.serviceName
-	for msg := range p {
-		err := c.publishMessage(msg, routingKey, exchangeName, headers)
-		if err != nil {
-			fmt.Printf("failed to publish message %+v", msg)
-		}
-	}
 }
 
 func (c *Connection) exchangeDeclare(channel AmqpChannel, name, kind string) error {
@@ -390,24 +425,24 @@ func (c *Connection) exchangeDeclare(channel AmqpChannel, name, kind string) err
 }
 
 func (c *Connection) addMsgHandler(queueName, routingKey string, handler func(interface{}) bool, eventType reflect.Type) error {
-	return c.addHandler(queueName, routingKey, eventType, func() MessageHandlerInvoker {
-		return MessageHandlerInvoker{msgHandler: handler, QueueRoutingKey: QueueRoutingKey{Queue: queueName, RoutingKey: routingKey}, EventType: eventType}
+	return c.addHandler(queueName, routingKey, eventType, func() messageHandlerInvoker {
+		return messageHandlerInvoker{msgHandler: handler, queueRoutingKey: queueRoutingKey{Queue: queueName, RoutingKey: routingKey}, EventType: eventType}
 	})
 }
 
 func (c *Connection) addResponseHandler(queueName, routingKey, serviceResponseExchangeName string, handler func(interface{}) (interface{}, bool), eventType reflect.Type) error {
-	return c.addHandler(queueName, routingKey, eventType, func() MessageHandlerInvoker {
-		return MessageHandlerInvoker{ResponseHandler: handler, QueueRoutingKey: QueueRoutingKey{Queue: queueName, RoutingKey: routingKey}, ResponseExchange: serviceResponseExchangeName, EventType: eventType}
+	return c.addHandler(queueName, routingKey, eventType, func() messageHandlerInvoker {
+		return messageHandlerInvoker{ResponseHandler: handler, queueRoutingKey: queueRoutingKey{Queue: queueName, RoutingKey: routingKey}, ResponseExchange: serviceResponseExchangeName, EventType: eventType}
 	})
 }
 
-func (c *Connection) addHandler(queueName, routingKey string, eventType reflect.Type, mHI func() MessageHandlerInvoker) error {
-	uniqueKey := QueueRoutingKey{Queue: queueName, RoutingKey: routingKey}
+func (c *Connection) addHandler(queueName, routingKey string, eventType reflect.Type, mHI func() messageHandlerInvoker) error {
+	uniqueKey := queueRoutingKey{Queue: queueName, RoutingKey: routingKey}
 
-	if existing, exist := c.Handlers[uniqueKey]; exist {
+	if existing, exist := c.handlers[uniqueKey]; exist {
 		return fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s", routingKey, queueName, existing.EventType, eventType)
 	}
-	c.Handlers[uniqueKey] = mHI()
+	c.handlers[uniqueKey] = mHI()
 
 	return nil
 }
@@ -425,7 +460,7 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler func(interface{}) bo
 	}
 }
 
-func (c *Connection) handleRequestResponse(d amqp.Delivery, invoker MessageHandlerInvoker, routingKey string) {
+func (c *Connection) handleRequestResponse(d amqp.Delivery, invoker messageHandlerInvoker, routingKey string) {
 	handler := invoker.ResponseHandler
 	message, err := c.parseMessage(d.Body, invoker.EventType, routingKey)
 	if err != nil {
@@ -446,7 +481,7 @@ func (c *Connection) handleRequestResponse(d amqp.Delivery, invoker MessageHandl
 }
 
 func (c *Connection) parseMessage(jsonContent []byte, eventType reflect.Type, routingKey string) (interface{}, error) {
-	c.MessageLogger(jsonContent, eventType, routingKey, false)
+	c.messageLogger(jsonContent, eventType, routingKey, false)
 	target := reflect.New(eventType).Interface()
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
 		return nil, err
@@ -461,7 +496,7 @@ func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName st
 	if err != nil {
 		return err
 	}
-	c.MessageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
+	c.messageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
 
 	if dm, ok := msg.(DelayedMessage); ok {
 		delayMillis := dm.TTL().Seconds() * 1000
@@ -478,7 +513,7 @@ func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName st
 		Headers:      headers,
 	}
 
-	return c.Channel.Publish(exchangeName,
+	return c.channel.Publish(exchangeName,
 		routingKey,
 		false,
 		false,
@@ -486,7 +521,7 @@ func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName st
 	)
 }
 
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]MessageHandlerInvoker) {
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
 	for d := range deliveries {
 		if h, ok := handlers[d.RoutingKey]; ok {
 			if h.ResponseExchange != "" {
@@ -506,11 +541,11 @@ func (c *Connection) messageHandlerBindQueueToExchange(queueName, exchangeName, 
 		return err
 	}
 
-	if err := c.exchangeDeclare(c.Channel, exchangeName, kind); err != nil {
+	if err := c.exchangeDeclare(c.channel, exchangeName, kind); err != nil {
 		return err
 	}
-	if err := queueDeclare(c.Channel, queueName); err != nil {
+	if err := queueDeclare(c.channel, queueName); err != nil {
 		return err
 	}
-	return c.Channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
+	return c.channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
 }

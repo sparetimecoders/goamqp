@@ -35,17 +35,17 @@ func Example() {
 		Password: "password",
 		VHost:    "",
 	}
-	publisher := make(chan interface{})
+	publisher := goamqp.NewPublisher(goamqp.Routes{IncomingMessage{}: "testkey"})
 
 	handler := &TestIncomingMessageHandler{}
 	connection := goamqp.New("service", config)
 	_ = connection.Start(
 		goamqp.EventStreamListener("testkey", handler.Process, reflect.TypeOf(IncomingMessage{})),
-		goamqp.EventStreamPublisher("testkey", publisher),
+		goamqp.EventStreamPublisher(publisher),
 	)
 
-	publisher <- IncomingMessage{"FAILED"}
-	publisher <- IncomingMessage{"OK"}
+	publisher.Publish(IncomingMessage{"FAILED"})
+	publisher.Publish(IncomingMessage{"OK"})
 	_ = connection.Close()
 }
 
