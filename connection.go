@@ -216,14 +216,14 @@ func (c *Connection) Start(opts ...Setup) error {
 	}
 
 	for _, f := range opts {
-		if gtFuncName(f) == "gitlab.com/sparetimecoders/goamqp.WithDelayedMessaging.func1" {
+		if getFuncName(f) == "gitlab.com/sparetimecoders/goamqp.WithDelayedMessaging.func1" {
 			_ = f(c)
 		}
 	}
 
 	for _, f := range opts {
 		if err := f(c); err != nil {
-			return fmt.Errorf("setup function <%s> failed, %v", gtFuncName(f), err)
+			return fmt.Errorf("setup function <%s> failed, %v", getFuncName(f), err)
 		}
 	}
 
@@ -235,7 +235,7 @@ func (c *Connection) Start(opts ...Setup) error {
 	return nil
 }
 
-func gtFuncName(f Setup) string {
+func getFuncName(f Setup) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
