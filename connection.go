@@ -157,10 +157,10 @@ func RequestResponseHandler(routingKey string, handler func(interface{}) (interf
 }
 
 // NewPublisher returns a publisher that can be used to send messages
-func NewPublisher(routes Routes) *Publisher {
+func NewPublisher(routes ...Route) *Publisher {
 	r := make(map[reflect.Type]string)
-	for msg, routingKey := range routes {
-		r[reflect.TypeOf(msg)] = routingKey
+	for _, route := range routes {
+		r[reflect.TypeOf(route.Type)] = route.Key
 	}
 
 	return &Publisher{
@@ -168,8 +168,11 @@ func NewPublisher(routes Routes) *Publisher {
 	}
 }
 
-// Routes defines the routekey to be used for a message type
-type Routes map[interface{}]string
+// Route defines the routekey to be used for a message type
+type Route struct {
+	Type interface{}
+	Key  string
+}
 
 // Publisher is used to send messages
 type Publisher struct {
