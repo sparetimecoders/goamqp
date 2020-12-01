@@ -47,20 +47,6 @@ func Test_Start_WithDelayedMessaging_Runs_First(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-type Response interface {
-}
-type Request interface {
-}
-type EventStreamListener2 interface {
-	HandleMessage(Response, *Request)
-}
-
-type EventStreamListener2Func func(Response, *Request)
-
-func (f EventStreamListener2Func) HandleMessage(w Response, r *Request) {
-	f(w, r)
-}
-
 func Test_Start_ConnectionFail(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return nil, errors.New("failed to connect")
@@ -393,7 +379,7 @@ func testHandleRequestResponse(json string, handled, publishFail bool) (MockAmqp
 func Test_EventStreamPublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "key", DelayedTestMessage{}: "key"})
+	p := NewPublisher(Route{TestMessage{}, "key"}, Route{DelayedTestMessage{}, "key"})
 	err := EventStreamPublisher(p)(conn)
 	assert.NoError(t, err)
 
@@ -403,12 +389,14 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 	assert.Equal(t, 0, len(channel.QueueDeclarations))
 	assert.Equal(t, 0, len(channel.BindingDeclarations))
 
-	p.Publish(TestMessage{"test", true})
+	err = p.Publish(TestMessage{"test", true})
+	assert.NoError(t, err)
 
 	published := <-channel.Published
 	assert.Equal(t, "key", published.key)
 
-	p.Publish(DelayedTestMessage{"test"})
+	err = p.Publish(DelayedTestMessage{"test"})
+	assert.NoError(t, err)
 	published = <-channel.Published
 
 	assert.Equal(t, 2, len(published.msg.Headers))
@@ -419,7 +407,7 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "key"})
+	p := NewPublisher(Route{TestMessage{}, "key"})
 	e := errors.New("failed to create exchange")
 	channel.ExchangeDeclarationError = &e
 	err := EventStreamPublisher(p)(conn)
@@ -431,7 +419,7 @@ func Test_UseMessageLogger(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	logger := &MockLogger{}
-	p := NewPublisher(Routes{TestMessage{}: "routingkey"})
+	p := NewPublisher(Route{TestMessage{}, "routingkey"})
 	_ = conn.Start(
 		UseMessageLogger(logger.logger()),
 		ServicePublisher("service", p),
@@ -440,7 +428,7 @@ func Test_UseMessageLogger(t *testing.T) {
 
 	err := p.Publish(TestMessage{"test", true})
 	assert.NoError(t, err)
-	_ = <-channel.Published
+	<-channel.Published
 
 	assert.Equal(t, true, logger.outgoing)
 	assert.Equal(t, "routingkey", logger.routingKey)
@@ -450,7 +438,7 @@ func Test_UseMessageLogger(t *testing.T) {
 func Test_UseMessageLogger_Nil(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "routingkey"})
+	p := NewPublisher(Route{TestMessage{}, "routingkey"})
 	err := conn.Start(
 		UseMessageLogger(nil),
 		ServicePublisher("service", p),
@@ -461,7 +449,7 @@ func Test_UseMessageLogger_Nil(t *testing.T) {
 func Test_UseMessageLogger_Default(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "routingkey"})
+	p := NewPublisher(Route{TestMessage{}, "routingkey"})
 	err := conn.Start(
 		ServicePublisher("service", p),
 	)
@@ -492,7 +480,7 @@ func Test_EventStreamListener(t *testing.T) {
 func Test_ServicePublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "key"})
+	p := NewPublisher(Route{TestMessage{}, "key"})
 
 	err := ServicePublisher("svc", p)(conn)
 	assert.NoError(t, err)
@@ -513,7 +501,7 @@ func Test_ServicePublisher_Ok(t *testing.T) {
 func Test_ServicePublisher_Multiple(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "key", DelayedTestMessage{}: "key2"})
+	p := NewPublisher(Route{TestMessage{}, "key"}, Route{DelayedTestMessage{}, "key2"})
 
 	err := ServicePublisher("svc", p)(conn)
 	assert.NoError(t, err)
@@ -545,7 +533,7 @@ func Test_ServicePublisher_Multiple(t *testing.T) {
 func Test_ServicePublisher_NoMatchingRoute(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Routes{TestMessage{}: "key"})
+	p := NewPublisher(Route{TestMessage{}, "key"})
 
 	err := ServicePublisher("svc", p)(conn)
 	assert.NoError(t, err)
@@ -566,7 +554,7 @@ func Test_ServicePublisher_ExchangeDeclareFail(t *testing.T) {
 	channel.ExchangeDeclarationError = &e
 	conn := mockConnection(channel)
 
-	p := NewPublisher(Routes{TestMessage{}: "key"})
+	p := NewPublisher(Route{TestMessage{}, "key"})
 	err := ServicePublisher("svc", p)(conn)
 	assert.Error(t, err)
 	assert.EqualError(t, err, e.Error())
