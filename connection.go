@@ -78,6 +78,13 @@ func WithDelayedMessaging() Setup {
 	}
 }
 
+// WithPrefetchLimit configures the number of messages to prefetch from the server.
+func WithPrefetchLimit(limit int) Setup {
+	return func(conn *Connection) error {
+		return conn.channel.Qos(limit, 0, true)
+	}
+}
+
 // TransientEventStreamListener sets up ap a event stream listener that will get removed when the channel is closed
 func TransientEventStreamListener(routingKey string, handler func(interface{}) bool, eventType reflect.Type) Setup {
 	return func(c *Connection) error {
@@ -216,6 +223,10 @@ func (c *Connection) Start(opts ...Setup) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if err := c.channel.Qos(20, 0, true); err != nil {
+		return err
 	}
 
 	for _, f := range opts {

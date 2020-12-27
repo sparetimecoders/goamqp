@@ -109,10 +109,14 @@ type MockAmqpChannel struct {
 	QueueDeclarationError    *error
 	NotifyCloseCalled        bool
 	ConfirmCalled            bool
+	qosFn                    func(prefetchCount, prefetchSize int, global bool) error
 }
 
 func (m *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
-	panic("implement me")
+	if m.qosFn == nil {
+		return nil
+	}
+	return m.qosFn(prefetchCount, prefetchSize, global)
 }
 
 func (m *MockAmqpChannel) NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation {
