@@ -481,12 +481,16 @@ func (c *Connection) handleRequestResponse(d amqp.Delivery, invoker messageHandl
 		_ = d.Reject(false)
 	} else {
 		if response, success := handler(message); success {
-			headers := amqp.Table{}
-			headers["service"] = d.Headers["service"]
-			if err := c.publishMessage(response, invoker.RoutingKey, invoker.ResponseExchange, headers); err != nil {
-				_ = d.Nack(false, false)
-			} else {
+			if response == nil {
 				_ = d.Ack(false)
+			} else {
+				headers := amqp.Table{}
+				headers["service"] = d.Headers["service"]
+				if err := c.publishMessage(response, invoker.RoutingKey, invoker.ResponseExchange, headers); err != nil {
+					_ = d.Nack(false, false)
+				} else {
+					_ = d.Ack(false)
+				}
 			}
 		} else {
 			_ = d.Nack(false, true)
