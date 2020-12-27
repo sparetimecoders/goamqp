@@ -307,7 +307,6 @@ func Test_Publish(t *testing.T) {
 }
 
 func Test_DivertToMessageHandler(t *testing.T) {
-
 	acker := MockAcknowledger{
 		Acks:    make(chan Ack, 3),
 		Nacks:   make(chan Nack, 1),

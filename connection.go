@@ -44,7 +44,7 @@ func New(serviceName string, config AmqpConfig) *Connection {
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
 
-// CloseListener revieces a callback when the AMQP Channel gets closed
+// CloseListener receives a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {
 	return func(c *Connection) error {
 		temp := make(chan *amqp.Error)
@@ -505,7 +505,6 @@ func (c *Connection) parseMessage(jsonContent []byte, eventType reflect.Type, ro
 }
 
 func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
-
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err
