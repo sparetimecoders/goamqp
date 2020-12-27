@@ -308,7 +308,7 @@ func Test_Publish(t *testing.T) {
 
 func Test_DivertToMessageHandler(t *testing.T) {
 	acker := MockAcknowledger{
-		Acks:    make(chan Ack, 3),
+		Acks:    make(chan Ack, 4),
 		Nacks:   make(chan Nack, 1),
 		Rejects: make(chan Reject, 1),
 	}
@@ -328,17 +328,26 @@ func Test_DivertToMessageHandler(t *testing.T) {
 			return "", i.(*Message).Ok
 		},
 	}
+	nilResInvoker := messageHandlerInvoker{
+		EventType:        reflect.TypeOf(Message{}),
+		ResponseExchange: "response",
+		ResponseHandler: func(i interface{}) (interface{}, bool) {
+			return nil, i.(*Message).Ok
+		},
+	}
 
 	handlers["key1"] = msgInvoker
 	handlers["key2"] = msgInvoker
 	handlers["key3"] = reqResInvoker
+	handlers["key4"] = nilResInvoker
 
-	queueDeliveries := make(chan amqp.Delivery, 5)
+	queueDeliveries := make(chan amqp.Delivery, 6)
 
 	queueDeliveries <- delivery(acker, "key1", true)
 	queueDeliveries <- delivery(acker, "key2", true)
 	queueDeliveries <- delivery(acker, "key2", false)
 	queueDeliveries <- delivery(acker, "key3", true)
+	queueDeliveries <- delivery(acker, "key4", true)
 	queueDeliveries <- delivery(acker, "missing", true)
 	close(queueDeliveries)
 
@@ -349,7 +358,7 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	}
 	c.divertToMessageHandlers(queueDeliveries, handlers)
 
-	assert.Equal(t, 3, len(acker.Acks))
+	assert.Equal(t, 4, len(acker.Acks))
 	assert.Equal(t, 1, len(acker.Nacks))
 	assert.Equal(t, 1, len(acker.Rejects))
 	assert.Equal(t, Publish{exchange: "response", key: "", mandatory: false, immediate: false, msg: amqp.Publishing{Headers: amqp.Table{"service": interface{}(nil)}, ContentType: "application/json", ContentEncoding: "", DeliveryMode: 0x2, Priority: 0x0, CorrelationId: "", ReplyTo: "", Expiration: "", MessageId: "", Type: "", UserId: "", AppId: "", Body: []uint8{0x22, 0x22}}}, <-channel.Published)
