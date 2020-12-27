@@ -109,10 +109,15 @@ type MockAmqpChannel struct {
 	QueueDeclarationError    *error
 	NotifyCloseCalled        bool
 	ConfirmCalled            bool
+	qosFn                    func(prefetchCount, prefetchSize int, global bool) error
+	consumeFn                func(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 }
 
 func (m *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
-	panic("implement me")
+	if m.qosFn == nil {
+		return nil
+	}
+	return m.qosFn(prefetchCount, prefetchSize, global)
 }
 
 func (m *MockAmqpChannel) NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation {
@@ -136,6 +141,9 @@ func (m *MockAmqpChannel) QueueBind(queue, key, exchange string, noWait bool, ar
 }
 
 func (m *MockAmqpChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+	if m.consumeFn != nil {
+		return m.consumeFn(queue, consumer, autoAck, exclusive, noLocal, noWait, args)
+	}
 	m.Consumers = append(m.Consumers, Consumer{queue, consumer, autoAck, exclusive, noLocal, noWait, args})
 	return m.Delivery, nil
 }

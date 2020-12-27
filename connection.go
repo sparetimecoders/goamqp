@@ -44,7 +44,7 @@ func New(serviceName string, config AmqpConfig) *Connection {
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
 
-// CloseListener revieces a callback when the AMQP Channel gets closed
+// CloseListener receives a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {
 	return func(c *Connection) error {
 		temp := make(chan *amqp.Error)
@@ -75,6 +75,13 @@ func WithDelayedMessaging() Setup {
 	return func(conn *Connection) error {
 		conn.config.DelayedMessage = true
 		return nil
+	}
+}
+
+// WithPrefetchLimit configures the number of messages to prefetch from the server.
+func WithPrefetchLimit(limit int) Setup {
+	return func(conn *Connection) error {
+		return conn.channel.Qos(limit, 0, true)
 	}
 }
 
@@ -216,6 +223,10 @@ func (c *Connection) Start(opts ...Setup) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if err := c.channel.Qos(20, 0, true); err != nil {
+		return err
 	}
 
 	for _, f := range opts {
@@ -494,7 +505,6 @@ func (c *Connection) parseMessage(jsonContent []byte, eventType reflect.Type, ro
 }
 
 func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
-
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err

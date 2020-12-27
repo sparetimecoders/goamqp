@@ -18,31 +18,104 @@ func Test_AmqpVersion(t *testing.T) {
 
 func Test_Start_MultipleCallsFails(t *testing.T) {
 	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
-	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
-		return mockAmqpConnection, nil
+	mockChannel := &MockAmqpChannel{
+		qosFn: func(prefetchCount, prefetchSize int, global bool) error {
+			assert.Equal(t, 20, prefetchCount)
+			return nil
+		},
 	}
-	conn, err := NewFromURL("", "amqp://user:password@localhost:67333/a")
-	assert.NoError(t, err)
-	err = conn.Start()
+	conn := &Connection{
+		serviceName: "test",
+		connection:  mockAmqpConnection,
+		channel:     mockChannel,
+	}
+	err := conn.Start()
 	assert.NoError(t, err)
 	err = conn.Start()
 	assert.Error(t, err)
 	assert.EqualError(t, err, "already started")
 }
 
+func Test_Start_SettingDefaultQosFails(t *testing.T) {
+	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
+	mockChannel := &MockAmqpChannel{
+		qosFn: func(prefetchCount, prefetchSize int, global bool) error {
+			return errors.New("error setting qos")
+		},
+	}
+	conn := &Connection{
+		serviceName: "test",
+		connection:  mockAmqpConnection,
+		channel:     mockChannel,
+	}
+	err := conn.Start()
+	assert.Error(t, err)
+	assert.EqualError(t, err, "error setting qos")
+}
+
+func Test_Start_SetupFails(t *testing.T) {
+	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
+	mockChannel := &MockAmqpChannel{
+		consumeFn: func(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+			return nil, errors.New("error consuming queue")
+		},
+	}
+	conn := &Connection{
+		serviceName: "test",
+		connection:  mockAmqpConnection,
+		channel:     mockChannel,
+		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
+	}
+	err := conn.Start(
+		EventStreamListener("test", func(i interface{}) bool {
+			return false
+		}, reflect.TypeOf(Message{})))
+	assert.Error(t, err)
+	assert.EqualError(t, err, "failed to create consumer for queue events.topic.exchange.queue.test. error consuming queue")
+}
+
 func Test_Start_WithDelayedMessaging_Runs_First(t *testing.T) {
 	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
-	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
-		return mockAmqpConnection, nil
+	mockChannel := &MockAmqpChannel{}
+	conn := &Connection{
+		serviceName: "test",
+		connection:  mockAmqpConnection,
+		channel:     mockChannel,
 	}
-	conn, err := NewFromURL("", "amqp://user:password@localhost:67333/a")
-	assert.NoError(t, err)
-	err = conn.Start(
+	err := conn.Start(
 		func(conn *Connection) error {
 			assert.True(t, conn.config.DelayedMessage)
 			return nil
 		},
 		WithDelayedMessaging(),
+	)
+	assert.NoError(t, err)
+}
+
+func Test_Start_WithPrefetchLimit_Resets_Qos(t *testing.T) {
+	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
+	mockChannel := &MockAmqpChannel{
+		qosFn: func(cc int) func(prefetchCount, prefetchSize int, global bool) error {
+			return func(prefetchCount, prefetchSize int, global bool) error {
+				defer func() {
+					cc++
+				}()
+				if cc == 0 {
+					assert.Equal(t, 20, prefetchCount)
+				} else {
+					assert.Equal(t, 1, prefetchCount)
+				}
+				return nil
+			}
+		}(0),
+	}
+	conn := &Connection{
+		serviceName: "test",
+		connection:  mockAmqpConnection,
+		channel:     mockChannel,
+	}
+	err := conn.Start(
+		WithPrefetchLimit(1),
 	)
 	assert.NoError(t, err)
 }
@@ -234,7 +307,6 @@ func Test_Publish(t *testing.T) {
 }
 
 func Test_DivertToMessageHandler(t *testing.T) {
-
 	acker := MockAcknowledger{
 		Acks:    make(chan Ack, 3),
 		Nacks:   make(chan Nack, 1),
