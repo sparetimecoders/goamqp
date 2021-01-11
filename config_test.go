@@ -113,5 +113,4 @@ func TestEnvParse(t *testing.T) {
 	assert.Equal(t, "b", c.VHost)
 	assert.Equal(t, "c", c.Username)
 	assert.Equal(t, "d", c.Password)
-	assert.False(t, c.DelayedMessage)
 }

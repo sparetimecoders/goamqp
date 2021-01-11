@@ -4,7 +4,6 @@ import (
 	"errors"
 	"github.com/streadway/amqp"
 	"reflect"
-	"time"
 )
 
 type Consumer struct {
@@ -55,12 +54,10 @@ type TestMessage struct {
 	Msg     string
 	Success bool
 }
-type DelayedTestMessage struct {
-	Msg string
-}
 
-func (DelayedTestMessage) TTL() time.Duration {
-	return time.Second
+type TestMessage2 struct {
+	Msg     string
+	Success bool
 }
 
 type Ack struct {
@@ -213,10 +210,10 @@ var _ amqpConnection = &MockAmqpConnection{}
 var _ AmqpChannel = &MockAmqpChannel{}
 
 func mockConnection(channel *MockAmqpChannel) *Connection {
-	c := newConnection("svc", AmqpConfig{DelayedMessage: true})
+	c := newConnection("svc", AmqpConfig{})
 	c.channel = channel
 	c.connection = &MockAmqpConnection{}
-	c.messageLogger = NopLogger()
+	c.messageLogger = NoOpMessageLogger()
 	return c
 }
 

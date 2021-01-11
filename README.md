@@ -4,18 +4,65 @@
 
 package goamqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
 
-Download:
+
+
+
+Getting Started
+===============
+
+Supports Go 1.11+ and uses [streadway-amqp](https://github.com/streadway/amqp) to connect to RabbitMQ.
+
+Using Go Modules
+----------------
+
+Starting with Go 1.13, you can use [Go Modules](https://blog.golang.org/using-go-modules) to install
+goamqp.
+
+Import the `goamqp` package from GitHub in your code:
+
+```golang
+import "gitlab.com/sparetimecoders/goamqp"
+```
+
+Build your project:
+
+```bash
+go build ./...
+```
+
+A dependency to the latest stable version of goamqp should be automatically added to
+your `go.mod` file.
+
+Install the client
+------------------
+
+If Go modules can't be used:
+
 ```bash
 go get gitlab.com/sparetimecoders/go_amqp
 ```
 
+## Usage
 
-# Developing
+See the 'examples' subdirectory.
 
+## Contributing
+TODO
+
+
+## References
+* Official ampq [documentation](https://www.rabbitmq.com/tutorials/amqp-concepts.html)
+
+## License
+MIT - see [LICENSE](./LICENSE) for more details.
+
+
+## Developing
+TODO
 ## Tests
 
 ```bash
-go test ./... 
+go test ./...
 ```
 
 ## Integration testing

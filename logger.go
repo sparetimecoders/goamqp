@@ -1,36 +1,100 @@
 package goamqp
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"reflect"
 )
 
-// MessageLogger is a func that can be used to log in/outgoing messages for debugging purposes
-type MessageLogger func(jsonContent []byte, eventType reflect.Type, routingKey string, outgoing bool)
-
-// NopLogger is a MessageLogger that will do nothing
-// This is the default implementation if the setup func UseMessageLogger is not used
-func NopLogger() MessageLogger {
-	return func(jsonContent []byte, eventType reflect.Type, routingKey string, outgoing bool) {
-	}
+// Logger represents the logging API
+// Maps to Apex log interface for convenience
+// https://github.com/apex/log/blob/master/interface.go
+type Logger interface {
+	Debug(string)
+	Info(string)
+	Warn(string)
+	Error(string)
+	Fatal(string)
+	Debugf(string, ...interface{})
+	Infof(string, ...interface{})
+	Warnf(string, ...interface{})
+	Errorf(string, ...interface{})
+	Fatalf(string, ...interface{})
 }
 
-// StdOutMessageLogger is an example implementation of a MessageLogger that dumps messages with fmt.Printf
-func StdOutMessageLogger() MessageLogger {
-	return func(jsonContent []byte, eventType reflect.Type, routingKey string, outgoing bool) {
-		var prettyJSON bytes.Buffer
-		err := json.Indent(&prettyJSON, jsonContent, "", "\t")
-		var prettyJSONString string
-		if err != nil {
-			prettyJSONString = string(jsonContent)
-		} else {
-			prettyJSONString = string(prettyJSON.Bytes())
-		}
-		if outgoing {
-			fmt.Printf("Sending [%s] using routingkey: '%s' with content:\n%s\n", eventType, routingKey, prettyJSONString)
-		}
-		fmt.Printf("Received [%s] from routingkey: '%s' with content:\n%s\n", eventType, routingKey, prettyJSONString)
-	}
+type noOpLogger struct{}
+
+func (m *noOpLogger) Debug(s string) {
 }
+
+func (m *noOpLogger) Info(s string) {
+}
+
+func (m *noOpLogger) Warn(s string) {
+}
+
+func (m *noOpLogger) Error(s string) {
+}
+
+func (m *noOpLogger) Fatal(s string) {
+}
+
+func (m *noOpLogger) Debugf(s string, i ...interface{}) {
+}
+
+func (m *noOpLogger) Infof(s string, i ...interface{}) {
+}
+
+func (m *noOpLogger) Warnf(s string, i ...interface{}) {
+}
+
+func (m *noOpLogger) Errorf(s string, i ...interface{}) {
+}
+
+func (m *noOpLogger) Fatalf(s string, i ...interface{}) {
+}
+
+var _ Logger = &noOpLogger{}
+
+type stdOutLogger struct {
+}
+
+func (l stdOutLogger) Debug(s string) {
+	fmt.Print(s)
+}
+
+func (l stdOutLogger) Info(s string) {
+	fmt.Print(s)
+}
+
+func (l stdOutLogger) Warn(s string) {
+	fmt.Print(s)
+}
+
+func (l stdOutLogger) Error(s string) {
+	fmt.Print(s)
+}
+
+func (l stdOutLogger) Fatal(s string) {
+	fmt.Print(s)
+}
+
+func (l stdOutLogger) Debugf(s string, i ...interface{}) {
+	fmt.Printf(s, i...)
+}
+
+func (l stdOutLogger) Infof(s string, i ...interface{}) {
+	fmt.Printf(s, i...)
+}
+
+func (l stdOutLogger) Warnf(s string, i ...interface{}) {
+	fmt.Printf(s, i...)
+}
+
+func (l stdOutLogger) Errorf(s string, i ...interface{}) {
+	fmt.Printf(s, i...)
+}
+
+func (l stdOutLogger) Fatalf(s string, i ...interface{}) {
+	fmt.Printf(s, i...)
+}
+
+var _ Logger = &stdOutLogger{}

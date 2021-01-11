@@ -53,9 +53,9 @@ type TestIncomingMessageHandler struct {
 	ctx string
 }
 
-func (i TestIncomingMessageHandler) Process(m interface{}) bool {
+func (i TestIncomingMessageHandler) Process(m interface{}, headers goamqp.Headers) (interface{}, error) {
 	fmt.Printf("Called process with %v and ctx %v\n", m, i.ctx)
-	return true
+	return nil, nil
 }
 
 type IncomingMessage struct {
