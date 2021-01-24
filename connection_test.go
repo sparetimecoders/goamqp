@@ -346,7 +346,7 @@ func TestResponseWrapper(t *testing.T) {
 				err:       tt.publisherErr,
 				published: nil,
 			}
-			headers := Headers{headers: map[string]interface{}{headerService: "test"}}
+			headers := Headers(map[string]interface{}{headerService: "test"})
 
 			if tt.headers != nil {
 				headers = *tt.headers
@@ -378,10 +378,10 @@ func Test_Headers(t *testing.T) {
 	require.Equal(t, "1", h.Get("valid1"))
 	require.Equal(t, "2", h.Get("valid2"))
 
-	h = Headers{headers: map[string]interface{}{headerService: "p"}}
+	h = map[string]interface{}{headerService: "p"}
 	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
 
-	h = Headers{headers: map[string]interface{}{"": "p"}}
+	h = map[string]interface{}{"": "p"}
 	require.EqualError(t, h.validate(), "empty key not allowed")
 
 	h = headers(amqp.Table{headerService: "peter"})

@@ -49,7 +49,7 @@ type ServiceResponsePublisher func(targetService, routingKey string, msg interfa
 // SendingService returns the name of the service that produced the message
 // Can be used to send a handlerResponse, see PublishServiceResponse
 func SendingService(headers Headers) (string, error) {
-	if h, exist := headers.headers[headerService]; exist {
+	if h, exist := headers[headerService]; exist {
 		switch v := h.(type) {
 		case string:
 			return v, nil

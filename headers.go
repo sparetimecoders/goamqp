@@ -14,13 +14,11 @@ type Header struct {
 }
 
 // Headers represent all meta-data for the message
-type Headers struct {
-	headers map[string]interface{}
-}
+type Headers map[string]interface{}
 
 // Get returns the header value for key, or nil if not present
 func (h Headers) Get(key string) interface{} {
-	if v, ok := h.headers[key]; ok {
+	if v, ok := h[key]; ok {
 		return v
 	}
 	return nil
@@ -39,7 +37,7 @@ func (h Header) validateKey() error {
 }
 
 func (h Headers) validate() error {
-	for k, v := range h.headers {
+	for k, v := range h {
 		h := Header{k, v}
 		if err := h.validateKey(); err != nil {
 			return err
@@ -49,7 +47,7 @@ func (h Headers) validate() error {
 }
 
 func headers(headers amqp.Table) Headers {
-	return Headers{headers: headers}
+	return Headers(headers)
 }
 
 var reservedHeaderKeys = []string{headerService}
