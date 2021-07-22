@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/streadway/amqp"
-	"github.com/stretchr/testify/require"
 	"math"
 	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/streadway/amqp"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_AmqpVersion(t *testing.T) {
@@ -139,6 +140,11 @@ func Test_CloseListener(t *testing.T) {
 	err := CloseListener(listener)(conn)
 	require.NoError(t, err)
 	require.Equal(t, true, channel.NotifyCloseCalled)
+	// nil is ignored
+	channel.ForceClose(nil)
+	channel.ForceClose(&amqp.Error{Code: 123, Reason: "Close reason"})
+	err = <-listener
+	require.EqualError(t, err, "Exception (123) Reason: \"Close reason\"")
 }
 
 func Test_ConnectToAmqpUrl_Ok(t *testing.T) {

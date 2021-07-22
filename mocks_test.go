@@ -2,8 +2,9 @@ package goamqp
 
 import (
 	"errors"
-	"github.com/streadway/amqp"
 	"reflect"
+
+	"github.com/streadway/amqp"
 )
 
 type Consumer struct {
@@ -108,6 +109,7 @@ type MockAmqpChannel struct {
 	ConfirmCalled            bool
 	qosFn                    func(prefetchCount, prefetchSize int, global bool) error
 	consumeFn                func(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
+	closeNotifier            chan *amqp.Error
 }
 
 func (m *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
@@ -129,6 +131,7 @@ func (m *MockAmqpChannel) Confirm(noWait bool) error {
 
 func (m *MockAmqpChannel) NotifyClose(c chan *amqp.Error) chan *amqp.Error {
 	m.NotifyCloseCalled = true
+	m.closeNotifier = c
 	return nil
 }
 
@@ -172,6 +175,10 @@ func (m *MockAmqpChannel) QueueDeclare(name string, durable, autoDelete, exclusi
 
 	m.QueueDeclarations = append(m.QueueDeclarations, QueueDeclaration{name, durable, autoDelete, noWait, args})
 	return amqp.Queue{}, nil
+}
+
+func (m *MockAmqpChannel) ForceClose(err *amqp.Error) {
+	m.closeNotifier <- err
 }
 
 type MockAmqpConnection struct {
