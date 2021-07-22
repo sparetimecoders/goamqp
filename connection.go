@@ -3,14 +3,15 @@ package goamqp
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
-	"github.com/streadway/amqp"
 	"io"
 	"os"
 	"reflect"
 	"runtime"
 	"runtime/debug"
 	"time"
+
+	"github.com/pkg/errors"
+	"github.com/streadway/amqp"
 )
 
 // EventType is the type of the message being sent
@@ -78,8 +79,9 @@ func CloseListener(e chan error) Setup {
 		temp := make(chan *amqp.Error)
 		go func() {
 			for {
-				ev := <-temp
-				e <- errors.New(ev.Error())
+				if ev := <-temp; ev != nil {
+					e <- errors.New(ev.Error())
+				}
 			}
 		}()
 		c.channel.NotifyClose(temp)
