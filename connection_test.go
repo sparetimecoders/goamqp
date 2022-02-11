@@ -441,7 +441,16 @@ func Test_messageHandlerBindQueueToExchange(t *testing.T) {
 	}
 	conn := mockConnection(channel)
 
-	err := conn.messageHandlerBindQueueToExchange("queue", "exchange", "routingkey", kindDirect, nil, nil, nil)
+	cfg := &QueueBindingConfig{
+		routingKey:   "routingkey",
+		handler:      nil,
+		eventType:    nil,
+		queueName:    "queue",
+		exchangeName: "exchange",
+		kind:         kindDirect,
+		headers:      nil,
+	}
+	err := conn.messageHandlerBindQueueToExchange(cfg)
 	require.EqualError(t, err, "failed to create queue")
 }
 func delivery(acker MockAcknowledger, routingKey string, success bool) amqp.Delivery {
@@ -645,6 +654,35 @@ func Test_EventStreamListener(t *testing.T) {
 
 	require.Equal(t, 1, len(channel.Consumers))
 	require.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
+}
+
+func Test_EventStreamListenerWithOptFunc(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+		return nil, nil
+	}, reflect.TypeOf(TestMessage{}), AddQueueNameSuffix("suffix")))
+	require.NoError(t, err)
+	require.Equal(t, 1, len(channel.ExchangeDeclarations))
+	require.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
+
+	require.Equal(t, 1, len(channel.QueueDeclarations))
+	require.Equal(t, QueueDeclaration{name: "events.topic.exchange.queue.svc-suffix", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
+
+	require.Equal(t, 1, len(channel.BindingDeclarations))
+	require.Equal(t, BindingDeclaration{queue: "events.topic.exchange.queue.svc-suffix", noWait: false, exchange: "events.topic.exchange", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
+
+	require.Equal(t, 1, len(channel.Consumers))
+	require.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc-suffix", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
+}
+
+func Test_EventStreamListenerWithFailingOptFunc(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+		return nil, nil
+	}, reflect.TypeOf(TestMessage{}), AddQueueNameSuffix("")))
+	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.EventStreamListener.func1> failed, queuebinding setup function <gitlab.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
 }
 
 func Test_ServiceRequestListener_Ok(t *testing.T) {
@@ -890,7 +928,7 @@ func Test_TransientEventStreamListener_HandlerForRoutingKeyAlreadyExists(t *test
 		return nil, errors.New("failed")
 	}, reflect.TypeOf(Message{}))(conn)
 
-	require.EqualError(t, err, "routingkey key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f already assigned to handler for type %!s(<nil>), cannot assign goamqp.Message")
+	require.EqualError(t, err, "routingkey key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f already assigned to handler for type %!s(<nil>), cannot assign goamqp.Message, consider using AddQueueNameSuffix")
 }
 
 func Test_TransientEventStreamListener_ExchangeDeclareFails(t *testing.T) {
@@ -906,6 +944,16 @@ func Test_TransientEventStreamListener_QueueDeclareFails(t *testing.T) {
 	e := errors.New("failed to create queue")
 	channel.QueueDeclarationError = &e
 	testTransientEventStreamListenerFailure(t, channel, e.Error())
+}
+
+func TestEmptyQueueNameSuffix(t *testing.T) {
+	require.EqualError(t, AddQueueNameSuffix("")(&QueueBindingConfig{}), ErrEmptySuffix.Error())
+}
+
+func TestQueueNameSuffix(t *testing.T) {
+	cfg := &QueueBindingConfig{queueName: "queue"}
+	require.NoError(t, AddQueueNameSuffix("suffix")(cfg))
+	require.Equal(t, "queue-suffix", cfg.queueName)
 }
 
 func testTransientEventStreamListenerFailure(t *testing.T, channel *MockAmqpChannel, expectedError string) {

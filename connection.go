@@ -47,6 +47,38 @@ type Connection struct {
 // ServiceResponsePublisher represents the function that is called to publish a response
 type ServiceResponsePublisher func(targetService, routingKey string, msg interface{}) error
 
+// QueueBindingConfig is a wrapper around the actual amqp queue configuration
+type QueueBindingConfig struct {
+	routingKey   string
+	handler      HandlerFunc
+	eventType    EventType
+	queueName    string
+	exchangeName string
+	kind         kind
+	headers      amqp.Table
+}
+
+// QueueBindingConfigSetup is a setup function that takes a QueueBindingConfig and provide custom changes to the
+// configuration
+type QueueBindingConfigSetup func(config *QueueBindingConfig) error
+
+// AddQueueNameSuffix appends the provided suffix to the queue name
+// Useful when multiple listeners are needed for a routing key in the same service
+func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
+	return func(config *QueueBindingConfig) error {
+		if suffix == "" {
+			return ErrEmptySuffix
+		}
+		config.queueName = fmt.Sprintf("%s-%s", config.queueName, suffix)
+		return nil
+	}
+}
+
+var (
+	// ErrEmptySuffix returned when an empty suffix is passed
+	ErrEmptySuffix = fmt.Errorf("empty queue suffix not allowed")
+)
+
 // SendingService returns the name of the service that produced the message
 // Can be used to send a handlerResponse, see PublishServiceResponse
 func SendingService(headers Headers) (string, error) {
@@ -124,7 +156,14 @@ func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventT
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(c.serviceName)
 		exchangeName := eventsExchangeName()
-		if err := c.addHandler(queueName, routingKey, eventType, messageHandlerInvoker{msgHandler: handler, queueRoutingKey: queueRoutingKey{Queue: queueName, RoutingKey: routingKey}, eventType: eventType}); err != nil {
+		if err := c.addHandler(queueName, routingKey, eventType, messageHandlerInvoker{
+			msgHandler: handler,
+			queueRoutingKey: queueRoutingKey{
+				Queue:      queueName,
+				RoutingKey: routingKey,
+			},
+			eventType: eventType,
+		}); err != nil {
 			return err
 		}
 
@@ -140,12 +179,24 @@ func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventT
 
 // EventStreamListener sets up ap a durable, persistent event stream listener
 // TODO Document how messages flow, reference docs.md?
-func EventStreamListener(routingKey string, handler HandlerFunc, eventType EventType) Setup {
+func EventStreamListener(routingKey string, handler HandlerFunc, eventType EventType, opts ...QueueBindingConfigSetup) Setup {
 	return func(c *Connection) error {
-		queueName := serviceEventQueueName(c.serviceName)
-		exchangeName := eventsExchangeName()
+		config := &QueueBindingConfig{
+			routingKey:   routingKey,
+			handler:      handler,
+			eventType:    eventType,
+			queueName:    serviceEventQueueName(c.serviceName),
+			exchangeName: eventsExchangeName(),
+			kind:         kindTopic,
+			headers:      amqp.Table{},
+		}
+		for _, f := range opts {
+			if err := f(config); err != nil {
+				return fmt.Errorf("queuebinding setup function <%s> failed, %v", getQueueBindingConfigSetupFuncName(f), err)
+			}
+		}
 
-		return c.messageHandlerBindQueueToExchange(queueName, exchangeName, routingKey, kindTopic, handler, eventType, amqp.Table{})
+		return c.messageHandlerBindQueueToExchange(config)
 	}
 }
 
@@ -168,10 +219,17 @@ func EventStreamPublisher(publisher *Publisher) Setup {
 // TODO Document how messages flow, reference docs.md?
 func ServiceResponseListener(targetService, routingKey string, handler HandlerFunc, eventType EventType) Setup {
 	return func(c *Connection) error {
-		exchangeName := serviceResponseExchangeName(targetService)
-		queueName := serviceResponseExchangeName(c.serviceName)
+		config := &QueueBindingConfig{
+			routingKey:   routingKey,
+			handler:      handler,
+			eventType:    eventType,
+			queueName:    serviceResponseExchangeName(c.serviceName),
+			exchangeName: serviceResponseExchangeName(targetService),
+			kind:         kindHeaders,
+			headers:      amqp.Table{headerService: c.serviceName},
+		}
 
-		return c.messageHandlerBindQueueToExchange(queueName, exchangeName, routingKey, kindHeaders, handler, eventType, amqp.Table{headerService: c.serviceName})
+		return c.messageHandlerBindQueueToExchange(config)
 	}
 }
 
@@ -180,15 +238,23 @@ func ServiceResponseListener(targetService, routingKey string, handler HandlerFu
 // TODO Document how messages flow, reference docs.md?
 func ServiceRequestListener(routingKey string, handler HandlerFunc, eventType EventType) Setup {
 	return func(c *Connection) error {
-		exchangeName := serviceRequestExchangeName(c.serviceName)
-		queueName := serviceRequestQueueName(c.serviceName)
 
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
 		if err := c.exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
 			return errors.Wrapf(err, "failed to create exchange %s", resExchangeName)
 		}
 
-		return c.messageHandlerBindQueueToExchange(queueName, exchangeName, routingKey, kindDirect, handler, eventType, amqp.Table{})
+		config := &QueueBindingConfig{
+			routingKey:   routingKey,
+			handler:      handler,
+			eventType:    eventType,
+			queueName:    serviceRequestQueueName(c.serviceName),
+			exchangeName: serviceRequestExchangeName(c.serviceName),
+			kind:         kindDirect,
+			headers:      amqp.Table{},
+		}
+
+		return c.messageHandlerBindQueueToExchange(config)
 	}
 }
 
@@ -272,7 +338,7 @@ func (c *Connection) Start(opts ...Setup) error {
 
 	for _, f := range opts {
 		if err := f(c); err != nil {
-			return fmt.Errorf("setup function <%s> failed, %v", getFuncName(f), err)
+			return fmt.Errorf("setup function <%s> failed, %v", getSetupFuncName(f), err)
 		}
 	}
 
@@ -415,7 +481,7 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType EventTyp
 	uniqueKey := queueRoutingKey{Queue: queueName, RoutingKey: routingKey}
 
 	if existing, exist := c.handlers[uniqueKey]; exist {
-		return fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s", routingKey, queueName, existing.eventType, eventType)
+		return fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s, consider using AddQueueNameSuffix", routingKey, queueName, existing.eventType, eventType)
 	}
 	c.handlers[uniqueKey] = mHI
 
@@ -479,18 +545,25 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, ha
 	}
 }
 
-func (c *Connection) messageHandlerBindQueueToExchange(queueName, exchangeName, routingKey string, kind kind, handler HandlerFunc, eventType EventType, headers amqp.Table) error {
-	if err := c.addHandler(queueName, routingKey, eventType, messageHandlerInvoker{msgHandler: handler, queueRoutingKey: queueRoutingKey{Queue: queueName, RoutingKey: routingKey}, eventType: eventType}); err != nil {
+func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
+	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.eventType, messageHandlerInvoker{
+		msgHandler: cfg.handler,
+		queueRoutingKey: queueRoutingKey{
+			Queue:      cfg.queueName,
+			RoutingKey: cfg.routingKey,
+		},
+		eventType: cfg.eventType,
+	}); err != nil {
 		return err
 	}
 
-	if err := c.exchangeDeclare(c.channel, exchangeName, kind); err != nil {
+	if err := c.exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
 		return err
 	}
-	if err := queueDeclare(c.channel, queueName); err != nil {
+	if err := queueDeclare(c.channel, cfg.queueName); err != nil {
 		return err
 	}
-	return c.channel.QueueBind(queueName, routingKey, exchangeName, false, headers)
+	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.headers)
 }
 
 type kind string
@@ -549,6 +622,10 @@ type messageHandlerInvoker struct {
 	eventType EventType
 }
 
-func getFuncName(f Setup) string {
+func getSetupFuncName(f Setup) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
+}
+
+func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
