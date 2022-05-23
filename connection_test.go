@@ -71,7 +71,7 @@ func Test_Start_SetupFails(t *testing.T) {
 	err := conn.Start(
 		EventStreamListener("test", func(i interface{}, headers Headers) (interface{}, error) {
 			return nil, errors.New("failed")
-		}, reflect.TypeOf(Message{})))
+		}, Message{}))
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to create consumer for queue events.topic.exchange.queue.test. error consuming queue")
 }
@@ -641,7 +641,7 @@ func Test_EventStreamListener(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{})))
+	}, TestMessage{}))
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
 	require.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
@@ -661,7 +661,7 @@ func Test_EventStreamListenerWithOptFunc(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{}), AddQueueNameSuffix("suffix")))
+	}, TestMessage{}, AddQueueNameSuffix("suffix")))
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
 	require.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
@@ -681,7 +681,7 @@ func Test_EventStreamListenerWithFailingOptFunc(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{}), AddQueueNameSuffix("")))
+	}, TestMessage{}, AddQueueNameSuffix("")))
 	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.EventStreamListener.func1> failed, queuebinding setup function <gitlab.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
 }
 
@@ -690,7 +690,7 @@ func Test_ServiceRequestListener_Ok(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(ServiceRequestListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{})))
+	}, TestMessage{}))
 
 	require.NoError(t, err)
 	require.Equal(t, 2, len(channel.ExchangeDeclarations))
@@ -714,7 +714,7 @@ func Test_ServiceRequestListener_ExchangeDeclareError(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(ServiceRequestListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{})))
+	}, TestMessage{}))
 
 	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.ServiceRequestListener.func1> failed, failed to create exchange svc.headers.exchange.response: failed")
 }
@@ -724,7 +724,7 @@ func Test_ServiceResponseListener_Ok(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(ServiceResponseListener("targetService", "key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{})))
+	}, TestMessage{}))
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -747,7 +747,7 @@ func Test_ServiceResponseListener_ExchangeDeclareError(t *testing.T) {
 	conn := mockConnection(channel)
 	err := conn.Start(ServiceResponseListener("targetService", "key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, nil
-	}, reflect.TypeOf(TestMessage{})))
+	}, TestMessage{}))
 
 	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.ServiceResponseListener.func1> failed, failed")
 }
@@ -756,7 +756,7 @@ func Test_RequestResponseHandler(t *testing.T) {
 	conn := mockConnection(channel)
 	err := RequestResponseHandler("key", func(msg interface{}, headers Headers) (response interface{}, err error) {
 		return nil, nil
-	}, reflect.TypeOf(Message{}))(conn)
+	}, Message{})(conn)
 	require.NoError(t, err)
 
 	require.Equal(t, 2, len(channel.ExchangeDeclarations))
@@ -889,7 +889,7 @@ func Test_TransientEventStreamListener_Ok(t *testing.T) {
 	uuid.SetRand(badRand{})
 	err := TransientEventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, errors.New("failed")
-	}, reflect.TypeOf(Message{}))(conn)
+	}, Message{})(conn)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.BindingDeclarations))
@@ -926,7 +926,7 @@ func Test_TransientEventStreamListener_HandlerForRoutingKeyAlreadyExists(t *test
 	uuid.SetRand(badRand{})
 	err := TransientEventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, errors.New("failed")
-	}, reflect.TypeOf(Message{}))(conn)
+	}, Message{})(conn)
 
 	require.EqualError(t, err, "routingkey key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f already assigned to handler for type %!s(<nil>), cannot assign goamqp.Message, consider using AddQueueNameSuffix")
 }
@@ -962,7 +962,7 @@ func testTransientEventStreamListenerFailure(t *testing.T, channel *MockAmqpChan
 	uuid.SetRand(badRand{})
 	err := TransientEventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
 		return nil, errors.New("failed")
-	}, reflect.TypeOf(Message{}))(conn)
+	}, Message{})(conn)
 
 	require.EqualError(t, err, expectedError)
 }
