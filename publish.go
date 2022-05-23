@@ -2,15 +2,16 @@ package goamqp
 
 import (
 	"fmt"
-	"github.com/streadway/amqp"
 	"reflect"
+
+	"github.com/streadway/amqp"
 )
 
 // Publisher is used to send messages
 type Publisher struct {
 	connection       *Connection
 	exchange         string
-	serviceHeader    string
+	defaultHeaders   []Header
 	typeToRoutingKey routes
 }
 
@@ -30,7 +31,9 @@ func NewPublisher(routes ...Route) *Publisher {
 // TODO Document how messages flow, reference docs.md?
 func (p *Publisher) Publish(msg interface{}, headers ...Header) error {
 	table := amqp.Table{}
-	table[headerService] = p.serviceHeader
+	for _, v := range p.defaultHeaders {
+		table[v.Key] = v.Value
+	}
 	for _, h := range headers {
 		if err := h.validateKey(); err != nil {
 			return err
@@ -47,4 +50,14 @@ func (p *Publisher) Publish(msg interface{}, headers ...Header) error {
 		return p.connection.publishMessage(msg, key, p.exchange, table)
 	}
 	return fmt.Errorf("no routingkey configured for message of type %s", t)
+}
+
+func (p *Publisher) setDefaultHeaders(serviceName string, headers ...Header) error {
+	for _, h := range headers {
+		if err := h.validateKey(); err != nil {
+			return err
+		}
+	}
+	p.defaultHeaders = append(headers, Header{Key: headerService, Value: serviceName})
+	return nil
 }
