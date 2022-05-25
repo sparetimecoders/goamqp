@@ -576,6 +576,33 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 	require.Equal(t, "svc", published.msg.Headers["service"])
 	require.Equal(t, "header", published.msg.Headers["x-header"])
 }
+func Test_QueuePublisher_Ok(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	p := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage{}, "key"})
+	err := QueuePublisher(p, "destQueue")(conn)
+	require.NoError(t, err)
+
+	require.Equal(t, 0, len(channel.ExchangeDeclarations))
+
+	require.Equal(t, 0, len(channel.QueueDeclarations))
+	require.Equal(t, 0, len(channel.BindingDeclarations))
+
+	err = p.Publish(TestMessage{"test", true})
+	require.NoError(t, err)
+
+	published := <-channel.Published
+	require.Equal(t, "key", published.key)
+
+	err = p.Publish(TestMessage{Msg: "test"}, Header{"x-header", "header"})
+	require.NoError(t, err)
+	published = <-channel.Published
+
+	require.Equal(t, 3, len(published.msg.Headers))
+	require.Equal(t, "svc", published.msg.Headers["service"])
+	require.Equal(t, "header", published.msg.Headers["x-header"])
+	require.Equal(t, "destQueue", published.msg.Headers["CC"].([]interface{})[0])
+}
 
 func Test_Publisher_ReservedHeader(t *testing.T) {
 	p := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage{}, "key"})

@@ -216,8 +216,26 @@ func EventStreamPublisher(publisher *Publisher) Setup {
 			return errors.Wrapf(err, "failed to declare exchange %s", eventsExchangeName())
 		}
 		publisher.connection = c
-		publisher.serviceHeader = c.serviceName
+		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
+			return err
+		}
 		publisher.exchange = eventsExchangeName()
+		return nil
+	}
+}
+
+// QueuePublisher sets up a publisher that will send events to a specific queue instead of using the exchange,
+// so called Sender-Selected distribution
+// https://www.rabbitmq.com/sender-selected.html#:~:text=The%20RabbitMQ%20broker%20treats%20the,key%20if%20they%20are%20present.
+func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
+	return func(c *Connection) error {
+		publisher.connection = c
+		if err := publisher.setDefaultHeaders(c.serviceName,
+			Header{Key: "CC", Value: []interface{}{destinationQueueName}},
+		); err != nil {
+			return err
+		}
+		publisher.exchange = ""
 		return nil
 	}
 }
@@ -274,7 +292,9 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 	return func(c *Connection) error {
 		reqExchangeName := serviceRequestExchangeName(targetService)
 		publisher.connection = c
-		publisher.serviceHeader = c.serviceName
+		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
+			return err
+		}
 		publisher.exchange = reqExchangeName
 		if err := c.exchangeDeclare(c.channel, reqExchangeName, kindDirect); err != nil {
 			return err
