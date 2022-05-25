@@ -14,9 +14,6 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// EventType is the type of the message being sent
-type EventType reflect.Type
-
 // Setup is a setup function that takes a Connection and use it to setup AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
@@ -51,7 +48,7 @@ type ServiceResponsePublisher func(targetService, routingKey string, msg interfa
 type QueueBindingConfig struct {
 	routingKey   string
 	handler      HandlerFunc
-	eventType    EventType
+	eventType    eventType
 	queueName    string
 	exchangeName string
 	kind         kind
@@ -152,17 +149,18 @@ func WithPrefetchLimit(limit int) Setup {
 
 // TransientEventStreamListener sets up ap a event stream listener that will get removed when the connection is closed
 // TODO Document how messages flow, reference docs.md?
-func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventType EventType) Setup {
+func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventType interface{}) Setup {
+	eventTyp := getEventType(eventType)
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(c.serviceName)
 		exchangeName := eventsExchangeName()
-		if err := c.addHandler(queueName, routingKey, eventType, messageHandlerInvoker{
+		if err := c.addHandler(queueName, routingKey, eventTyp, messageHandlerInvoker{
 			msgHandler: handler,
 			queueRoutingKey: queueRoutingKey{
 				Queue:      queueName,
 				RoutingKey: routingKey,
 			},
-			eventType: eventType,
+			eventType: eventTyp,
 		}); err != nil {
 			return err
 		}
@@ -179,12 +177,13 @@ func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventT
 
 // EventStreamListener sets up ap a durable, persistent event stream listener
 // TODO Document how messages flow, reference docs.md?
-func EventStreamListener(routingKey string, handler HandlerFunc, eventType EventType, opts ...QueueBindingConfigSetup) Setup {
+func EventStreamListener(routingKey string, handler HandlerFunc, eventType interface{}, opts ...QueueBindingConfigSetup) Setup {
+	eventTyp := getEventType(eventType)
 	return func(c *Connection) error {
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
 			handler:      handler,
-			eventType:    eventType,
+			eventType:    eventTyp,
 			queueName:    serviceEventQueueName(c.serviceName),
 			exchangeName: eventsExchangeName(),
 			kind:         kindTopic,
@@ -198,6 +197,15 @@ func EventStreamListener(routingKey string, handler HandlerFunc, eventType Event
 
 		return c.messageHandlerBindQueueToExchange(config)
 	}
+}
+
+func getEventType(eventType interface{}) eventType {
+	if t, ok := eventType.(reflect.Type); ok {
+		// Backward compatibility
+		fmt.Println("passing reflect.TypeOf event types is deprecated and will return error in future releases")
+		return t
+	}
+	return reflect.TypeOf(eventType)
 }
 
 // EventStreamPublisher sets up ap a event stream publisher
@@ -217,12 +225,13 @@ func EventStreamPublisher(publisher *Publisher) Setup {
 // ServiceResponseListener is a specialization of EventStreamListener
 // It sets up ap a durable, persistent listener (exchange->queue) for responses from targetService
 // TODO Document how messages flow, reference docs.md?
-func ServiceResponseListener(targetService, routingKey string, handler HandlerFunc, eventType EventType) Setup {
+func ServiceResponseListener(targetService, routingKey string, handler HandlerFunc, eventType interface{}) Setup {
+	eventTyp := getEventType(eventType)
 	return func(c *Connection) error {
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
 			handler:      handler,
-			eventType:    eventType,
+			eventType:    eventTyp,
 			queueName:    serviceResponseExchangeName(c.serviceName),
 			exchangeName: serviceResponseExchangeName(targetService),
 			kind:         kindHeaders,
@@ -236,7 +245,8 @@ func ServiceResponseListener(targetService, routingKey string, handler HandlerFu
 // ServiceRequestListener is a specialization of EventStreamListener
 // It sets up ap a durable, persistent listener (exchange->queue) for message to the service owning the Connection
 // TODO Document how messages flow, reference docs.md?
-func ServiceRequestListener(routingKey string, handler HandlerFunc, eventType EventType) Setup {
+func ServiceRequestListener(routingKey string, handler HandlerFunc, eventType interface{}) Setup {
+	eventTyp := getEventType(eventType)
 	return func(c *Connection) error {
 
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
@@ -247,7 +257,7 @@ func ServiceRequestListener(routingKey string, handler HandlerFunc, eventType Ev
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
 			handler:      handler,
-			eventType:    eventType,
+			eventType:    eventTyp,
 			queueName:    serviceRequestQueueName(c.serviceName),
 			exchangeName: serviceRequestExchangeName(c.serviceName),
 			kind:         kindDirect,
@@ -275,7 +285,7 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 
 // RequestResponseHandler is a convenience func to setup ServiceRequestListener and combines it with PublishServiceResponse
 // TODO Document how messages flow, reference docs.md?
-func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType EventType) Setup {
+func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType interface{}) Setup {
 	return func(c *Connection) error {
 		responseHandlerWrapper := ResponseWrapper(handler, routingKey, c.PublishServiceResponse)
 		return ServiceRequestListener(routingKey, responseHandlerWrapper, eventType)(c)
@@ -477,7 +487,7 @@ func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind
 	)
 }
 
-func (c *Connection) addHandler(queueName, routingKey string, eventType EventType, mHI messageHandlerInvoker) error {
+func (c *Connection) addHandler(queueName, routingKey string, eventType eventType, mHI messageHandlerInvoker) error {
 	uniqueKey := queueRoutingKey{Queue: queueName, RoutingKey: routingKey}
 
 	if existing, exist := c.handlers[uniqueKey]; exist {
@@ -488,7 +498,7 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType EventTyp
 	return nil
 }
 
-func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType EventType, routingKey string) {
+func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType, routingKey string) {
 	message, err := c.parseMessage(d.Body, eventType, routingKey)
 	if err != nil {
 		_ = d.Reject(false)
@@ -502,7 +512,7 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 	}
 }
 
-func (c *Connection) parseMessage(jsonContent []byte, eventType EventType, routingKey string) (interface{}, error) {
+func (c *Connection) parseMessage(jsonContent []byte, eventType eventType, routingKey string) (interface{}, error) {
 	c.messageLogger(jsonContent, eventType, routingKey, false)
 	target := reflect.New(eventType).Interface()
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
@@ -609,6 +619,8 @@ func (c *Connection) setup() error {
 	return nil
 }
 
+type eventType reflect.Type
+
 type routes map[reflect.Type]string
 
 type queueRoutingKey struct {
@@ -619,7 +631,7 @@ type queueRoutingKey struct {
 type messageHandlerInvoker struct {
 	msgHandler HandlerFunc
 	queueRoutingKey
-	eventType EventType
+	eventType eventType
 }
 
 func getSetupFuncName(f Setup) string {
