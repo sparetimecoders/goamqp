@@ -1,77 +1,29 @@
-# go_amqp
+# goamqp - event-driven amqp for golang
 
-[![GoReportCard](https://goreportcard.com/badge/gitlab.com/sparetimecoders/go_amqp)](https://goreportcard.com/report/gitlab.com/sparetimecoders/go_amqp) [![GoDoc](https://godoc.org/gitlab.com/sparetimecoders/go_amqp?status.svg)](https://godoc.org/gitlab.com/sparetimecoders/go_amqp) [![Build Status](https://gitlab.com/sparetimecoders/go_amqp/badges/master/pipeline.svg)](https://gitlab.com/sparetimecoders/go_amqp/commits/master)[![coverage report](https://gitlab.com/sparetimecoders/go_amqp/badges/master/coverage.svg)](https://gitlab.com/sparetimecoders/go_amqp/commits/master)
+<p align="center">
+  <a href="https://github.com/sparetimecoders/goamqp/actions"><img alt="GitHub Actions" src="https://github.com/sparetimecoders/goamqp/workflows/goamqp/badge.svg"></a>
+  <a href="https://github.com/sparetimecoders/goamqp/releases"><img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/sparetimecoders/goamqp"></a>
+  <a href="pulls"><img alt="GitHub pull requests" src="https://img.shields.io/github/issues-pr/sparetimecoders/goamqp"></a>
+  <a href="https://github.com/sparetimecoders/goamqp/releases"><img alt="GitHub All Releases" src="https://img.shields.io/github/downloads/sparetimecoders/goamqp/total"></a>
+</p>
 
-package goamqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
+<p align="center">
+  <a href="https://github.com/sparetimecoders/goamqp/blob/main/LICENSE"><img alt="LICENSE" src="https://img.shields.io/badge/license-MIT-blue.svg?maxAge=43200"></a>
+  <a href="https://codecov.io/github/sparetimecoders/goamqp"><img alt="Coverage Status" src="https://codecov.io/gh/sparetimecoders/goamqp/branch/main/graph/badge.svg"></a>
+  <a href="https://goreportcard.com/report/github.com/sparetimecoders/goamqp"><img alt="goreportcard badge" src="https://goreportcard.com/badge/github.com/sparetimecoders/goamqp" /></a>
+</p>
 
+Package goamqp provides an opiniated way of using [rabbitmq](https://www.rabbitmq.com/) for event-driven architectures.
 
+## Documentation
 
-
-Getting Started
-===============
-
-Supports Go 1.11+ and uses [streadway-amqp](https://github.com/streadway/amqp) to connect to RabbitMQ.
-
-Using Go Modules
-----------------
-
-Starting with Go 1.13, you can use [Go Modules](https://blog.golang.org/using-go-modules) to install
-goamqp.
-
-Import the `goamqp` package from GitHub in your code:
-
-```golang
-import "gitlab.com/sparetimecoders/goamqp"
-```
-
-Build your project:
-
-```bash
-go build ./...
-```
-
-A dependency to the latest stable version of goamqp should be automatically added to
-your `go.mod` file.
-
-Install the client
-------------------
-
-If Go modules can't be used:
-
-```bash
-go get gitlab.com/sparetimecoders/go_amqp
-```
-
-## Usage
-
-See the 'examples' subdirectory.
-
-## Contributing
-TODO
+Documentation is in the [docs](docs) directory.
 
 
 ## References
-* Official ampq [documentation](https://www.rabbitmq.com/tutorials/amqp-concepts.html)
 
-## License
-MIT - see [LICENSE](./LICENSE) for more details.
+Official ampq [documentation](https://www.rabbitmq.com/tutorials/amqp-concepts.html)
 
+## Getting Involved and Contributing
 
-## Developing
-TODO
-## Tests
-
-```bash
-go test ./...
-```
-
-## Integration testing
-Requires a running rabbitmq, for example:
-
-```bash
-docker run --name rabbit -p 15672:15672 -p 5672:5672 sparetimecoders/rabbitmq
-```
-Run the tests:
-```bash
-go test ./... -tags=integration
-```
+See [Contributing](CONTRIBUTING.md)

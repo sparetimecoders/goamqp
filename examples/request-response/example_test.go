@@ -17,7 +17,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-package goamqp_test
+package request_response
 
 import (
 	"fmt"
@@ -26,23 +26,31 @@ import (
 	. "github.com/sparetimecoders/goamqp"
 )
 
-func Example() {
+func ExampleRequestResponse() {
+	amqpURL := "amqp://user:password@localhost:5672/test"
+	routingKey := "key"
 
-	amqpURL := "amqp://user:password@localhost:5672/"
-	publisher := Must(NewPublisher(Route{Type: IncomingMessage{}, Key: "key"}))
-
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(
-		EventStreamConsumer("key", process, IncomingMessage{}),
-		EventStreamPublisher(publisher),
+	serviceConnection := Must(NewFromURL("service", amqpURL))
+	err := serviceConnection.Start(
+		RequestResponseHandler(routingKey, handleRequest, Request{}),
 	)
 	checkError(err)
-	err = publisher.Publish(IncomingMessage{"OK"})
+
+	clientConnection := Must(NewFromURL("client", amqpURL))
+	publisher := Must(NewPublisher(Route{Type: Request{}, Key: routingKey}))
+
+	err = clientConnection.Start(
+		ServicePublisher("service", publisher),
+		ServiceResponseConsumer("service", routingKey, handleResponse, Response{}),
+	)
 	checkError(err)
+
+	err = publisher.Publish(Request{Data: "test"})
+	checkError(err)
+
 	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
+	_ = serviceConnection.Close()
+	_ = clientConnection.Close()
 }
 
 func checkError(err error) {
@@ -51,11 +59,22 @@ func checkError(err error) {
 	}
 }
 
-func process(m any, headers Headers) (any, error) {
-	fmt.Printf("Called process with %v\n", m.(*IncomingMessage).Data)
+func handleRequest(m any, headers Headers) (any, error) {
+	request := m.(*Request)
+	response := Response{Data: request.Data}
+	fmt.Printf("Called process with %v, returning response %v\n", request.Data, response)
+	return response, nil
+}
+
+func handleResponse(m any, headers Headers) (any, error) {
+	response := m.(*Response)
+	fmt.Printf("Got response, returning response %v\n", response.Data)
 	return nil, nil
 }
 
-type IncomingMessage struct {
+type Request struct {
+	Data string
+}
+type Response struct {
 	Data string
 }

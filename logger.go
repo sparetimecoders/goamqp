@@ -1,100 +1,29 @@
+// MIT License
+//
+// Copyright (c) 2019 sparetimecoders
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 package goamqp
 
-import (
-	"fmt"
-)
+// errorLogf function called for error logs
+type errorLogf func(s string, a ...any)
 
-// Logger represents the logging API
-// Maps to Apex log interface for convenience
-// https://github.com/apex/log/blob/master/interface.go
-type Logger interface {
-	Debug(string)
-	Info(string)
-	Warn(string)
-	Error(string)
-	Fatal(string)
-	Debugf(string, ...interface{})
-	Infof(string, ...interface{})
-	Warnf(string, ...interface{})
-	Errorf(string, ...interface{})
-	Fatalf(string, ...interface{})
-}
-
-type noOpLogger struct{}
-
-func (m *noOpLogger) Debug(s string) {
-}
-
-func (m *noOpLogger) Info(s string) {
-}
-
-func (m *noOpLogger) Warn(s string) {
-}
-
-func (m *noOpLogger) Error(s string) {
-}
-
-func (m *noOpLogger) Fatal(s string) {
-}
-
-func (m *noOpLogger) Debugf(s string, i ...interface{}) {
-}
-
-func (m *noOpLogger) Infof(s string, i ...interface{}) {
-}
-
-func (m *noOpLogger) Warnf(s string, i ...interface{}) {
-}
-
-func (m *noOpLogger) Errorf(s string, i ...interface{}) {
-}
-
-func (m *noOpLogger) Fatalf(s string, i ...interface{}) {
-}
-
-var _ Logger = &noOpLogger{}
-
-type stdOutLogger struct {
-}
-
-func (l stdOutLogger) Debug(s string) {
-	fmt.Print(s)
-}
-
-func (l stdOutLogger) Info(s string) {
-	fmt.Print(s)
-}
-
-func (l stdOutLogger) Warn(s string) {
-	fmt.Print(s)
-}
-
-func (l stdOutLogger) Error(s string) {
-	fmt.Print(s)
-}
-
-func (l stdOutLogger) Fatal(s string) {
-	fmt.Print(s)
-}
-
-func (l stdOutLogger) Debugf(s string, i ...interface{}) {
-	fmt.Printf(s, i...)
-}
-
-func (l stdOutLogger) Infof(s string, i ...interface{}) {
-	fmt.Printf(s, i...)
-}
-
-func (l stdOutLogger) Warnf(s string, i ...interface{}) {
-	fmt.Printf(s, i...)
-}
-
-func (l stdOutLogger) Errorf(s string, i ...interface{}) {
-	fmt.Printf(s, i...)
-}
-
-func (l stdOutLogger) Fatalf(s string, i ...interface{}) {
-	fmt.Printf(s, i...)
-}
-
-var _ Logger = &stdOutLogger{}
+// noOpLogger log function that does nothing
+var noOpLogger = func(s string, a ...any) {}

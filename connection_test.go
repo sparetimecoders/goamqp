@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2019 sparetimecoders
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 package goamqp
 
 import (
@@ -10,12 +32,34 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
 )
 
 func Test_AmqpVersion(t *testing.T) {
 	require.Equal(t, "_unknown_", amqpVersion())
+}
+
+func Test_UseLogger(t *testing.T) {
+	conn := &Connection{errorLogF: nil}
+	logger := noOpLogger
+	loggerName := runtime.FuncForPC(reflect.ValueOf(logger).Pointer()).Name()
+	require.NoError(t, UseLogger(logger)(conn))
+	setLoggerName := runtime.FuncForPC(reflect.ValueOf(conn.errorLogF).Pointer()).Name()
+	require.Equal(t, loggerName, setLoggerName)
+
+	conn = &Connection{errorLogF: nil}
+	require.EqualError(t, UseLogger(nil)(conn), "cannot use nil as logger func")
+	require.Nil(t, conn.errorLogF)
+}
+
+func Test_getEventType(t *testing.T) {
+	e, err := getEventType(TestMessage{})
+	require.NoError(t, err)
+	require.Equal(t, reflect.TypeOf(TestMessage{}), e)
+
+	_, err = getEventType(reflect.TypeOf(TestMessage{}))
+	require.Error(t, err)
 }
 
 func Test_Start_MultipleCallsFails(t *testing.T) {
@@ -69,7 +113,7 @@ func Test_Start_SetupFails(t *testing.T) {
 		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
 	}
 	err := conn.Start(
-		EventStreamListener("test", func(i interface{}, headers Headers) (interface{}, error) {
+		EventStreamConsumer("test", func(i any, headers Headers) (any, error) {
 			return nil, errors.New("failed")
 		}, Message{}))
 	require.Error(t, err)
@@ -105,6 +149,8 @@ func Test_Start_WithPrefetchLimit_Resets_Qos(t *testing.T) {
 }
 
 func Test_Start_ConnectionFail(t *testing.T) {
+	orgDial := dialAmqp
+	defer func() { dialAmqp = orgDial }()
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return nil, errors.New("failed to connect")
 	}
@@ -113,6 +159,18 @@ func Test_Start_ConnectionFail(t *testing.T) {
 	err = conn.Start()
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to connect")
+}
+
+func TestMust(t *testing.T) {
+	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
+	require.NotNil(t, conn)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+	_ = Must(NewFromURL("", "invalid"))
 }
 
 func Test_CloseCallsUnderlyingCloseMethod(t *testing.T) {
@@ -149,6 +207,8 @@ func Test_CloseListener(t *testing.T) {
 
 func Test_ConnectToAmqpUrl_Ok(t *testing.T) {
 	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
+	orgDial := dialAmqp
+	defer func() { dialAmqp = orgDial }()
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return mockAmqpConnection, nil
 	}
@@ -166,6 +226,8 @@ func Test_ConnectToAmqpUrl_Ok(t *testing.T) {
 }
 
 func Test_ConnectToAmqpUrl_ConnectionFailed(t *testing.T) {
+	orgDial := dialAmqp
+	defer func() { dialAmqp = orgDial }()
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return nil, errors.New("failure to connect")
 	}
@@ -178,6 +240,8 @@ func Test_ConnectToAmqpUrl_ConnectionFailed(t *testing.T) {
 
 func Test_ConnectToAmqpUrl_FailToGetChannel(t *testing.T) {
 	mockAmqpConnection := &MockAmqpConnection{}
+	orgDial := dialAmqp
+	defer func() { dialAmqp = orgDial }()
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return mockAmqpConnection, nil
 	}
@@ -192,7 +256,7 @@ func Test_FailingSetupFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	err := conn.Start(func(c *Connection) error { return nil }, func(c *Connection) error { return fmt.Errorf("error message") })
-	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.Test_FailingSetupFunc.func2> failed, error message")
+	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.Test_FailingSetupFunc.func2> failed, error message")
 }
 
 func Test_NewFromURL_InvalidURL(t *testing.T) {
@@ -261,7 +325,7 @@ func Test_Publish(t *testing.T) {
 	headers["key"] = "value"
 	c := Connection{
 		channel:       channel,
-		messageLogger: NoOpMessageLogger(),
+		messageLogger: noOpMessageLogger(),
 	}
 	err := c.publishMessage(Message{true}, "key", "exchange", headers)
 	require.NoError(t, err)
@@ -296,7 +360,7 @@ func Test_Publish_Marshal_Errir(t *testing.T) {
 	headers["key"] = "value"
 	c := Connection{
 		channel:       channel,
-		messageLogger: NoOpMessageLogger(),
+		messageLogger: noOpMessageLogger(),
 	}
 	err := c.publishMessage(math.Inf(1), "key", "exchange", headers)
 	require.EqualError(t, err, "json: unsupported value: +Inf")
@@ -304,12 +368,12 @@ func Test_Publish_Marshal_Errir(t *testing.T) {
 func TestResponseWrapper(t *testing.T) {
 	tests := []struct {
 		name         string
-		handlerResp  interface{}
+		handlerResp  any
 		handlerErr   error
-		published    interface{}
+		published    any
 		publisherErr error
 		wantErr      error
-		wantResp     interface{}
+		wantResp     any
 		headers      *Headers
 	}{
 		{
@@ -352,12 +416,12 @@ func TestResponseWrapper(t *testing.T) {
 				err:       tt.publisherErr,
 				published: nil,
 			}
-			headers := Headers(map[string]interface{}{headerService: "test"})
+			headers := Headers(map[string]any{headerService: "test"})
 
 			if tt.headers != nil {
 				headers = *tt.headers
 			}
-			resp, err := ResponseWrapper(func(i interface{}, headers Headers) (interface{}, error) {
+			resp, err := responseWrapper(func(i any, headers Headers) (any, error) {
 				return tt.handlerResp, tt.handlerErr
 			}, "key", p.publish)(&Message{}, headers)
 			p.checkPublished(t, tt.published)
@@ -384,13 +448,14 @@ func Test_Headers(t *testing.T) {
 	require.Equal(t, "1", h.Get("valid1"))
 	require.Equal(t, "2", h.Get("valid2"))
 
-	h = map[string]interface{}{headerService: "p"}
+	h = map[string]any{headerService: "p"}
 	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
 
-	h = map[string]interface{}{"": "p"}
+	h = map[string]any{"": "p"}
 	require.EqualError(t, h.validate(), "empty key not allowed")
 
 	h = headers(amqp.Table{headerService: "peter"})
+	require.Equal(t, h.Get(headerService), "peter")
 }
 
 func Test_DivertToMessageHandler(t *testing.T) {
@@ -404,7 +469,7 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	handlers := make(map[string]messageHandlerInvoker)
 	msgInvoker := messageHandlerInvoker{
 		eventType: reflect.TypeOf(Message{}),
-		msgHandler: func(i interface{}, headers Headers) (interface{}, error) {
+		msgHandler: func(i any, headers Headers) (any, error) {
 			if i.(*Message).Ok {
 				return nil, nil
 			}
@@ -425,8 +490,8 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	c := Connection{
 		started:       true,
 		channel:       &channel,
-		messageLogger: NoOpMessageLogger(),
-		log:           &noOpLogger{},
+		messageLogger: noOpMessageLogger(),
+		errorLogF:     noOpLogger,
 	}
 	c.divertToMessageHandlers(queueDeliveries, handlers)
 
@@ -483,10 +548,10 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 		Acknowledger: &acker,
 	}
 	c := &Connection{
-		messageLogger: NoOpMessageLogger(),
-		log:           &noOpLogger{},
+		messageLogger: noOpMessageLogger(),
+		errorLogF:     noOpLogger,
 	}
-	c.handleMessage(delivery, func(i interface{}, headers Headers) (interface{}, error) {
+	c.handleMessage(delivery, func(i any, headers Headers) (any, error) {
 		if handle {
 			return nil, nil
 		}
@@ -496,64 +561,12 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 	return acker
 }
 
-//func Test_HandleRequestResponse_Reject_IfParseFails(t *testing.T) {
-//	_, acker := testHandleRequestResponse("", true, false)
-//	require.Equal(t, Reject{tag: 0x0, requeue: false}, <-acker.Rejects)
-//}
-//
-//func Test_HandleRequestResponse_NackRequeuedWhenHandlingFailed(t *testing.T) {
-//	_, acker := testHandleRequestResponse("{}", false, false)
-//	require.Equal(t, Nack{tag: 0x0, multiple: false, requeue: true}, <-acker.Nacks)
-//}
-//
-//func Test_HandleRequestResponse_NackNotRequeuedWhenPublishFails(t *testing.T) {
-//	_, acker := testHandleRequestResponse("{}", true, true)
-//	require.Equal(t, Nack{tag: 0x0, multiple: false, requeue: false}, <-acker.Nacks)
-//}
-//
-//func Test_HandleRequestResponse_AckWhenSuccess(t *testing.T) {
-//	channel, acker := testHandleRequestResponse("{}", true, false)
-//	require.Equal(t, Ack{tag: 0x0, multiple: false}, <-acker.Acks)
-//	require.Equal(t, Publish{exchange: "", key: "ok", mandatory: false, immediate: false, msg: amqp.Publishing{Headers: amqp.Table{"service": interface{}(nil)}, ContentType: "application/json", ContentEncoding: "", DeliveryMode: 0x2, Body: []uint8{0x7b, 0x22, 0x6e, 0x61, 0x6d, 0x65, 0x22, 0x3a, 0x22, 0x22, 0x7d}}}, <-channel.Published)
-//
-//}
-//
-//func testHandleRequestResponse(json string, handled, publishFail bool) (MockAmqpChannel, MockAcknowledger) {
-//	acker := NewMockAcknowledger()
-//	channel := MockAmqpChannel{Published: make(chan Publish, 1)}
-//	delivery := amqp.Delivery{
-//		Body:         []byte(json),
-//		Acknowledger: &acker,
-//	}
-//	invoker := messageHandlerInvoker{
-//		eventType: reflect.TypeOf(Message{}),
-//		ResponseHandler: func(i2 interface{}) (i interface{}, b bool) {
-//			return Delayed{}, handled
-//		},
-//	}
-//	if publishFail {
-//		invoker.queueRoutingKey = queueRoutingKey{
-//			RoutingKey: "failed",
-//		}
-//	} else {
-//		invoker.queueRoutingKey = queueRoutingKey{
-//			RoutingKey: "ok",
-//		}
-//	}
-//	c := &Connection{
-//		channel:       &channel,
-//		messageLogger: NoOpMessageLogger(),
-//	}
-//
-//	c.handleRequestResponse(delivery, invoker, "r")
-//	return channel, acker
-//}
-
 func Test_EventStreamPublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage{}, "key"})
-	err := EventStreamPublisher(p)(conn)
+	p, err := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage2{}, "key2"})
+	require.NoError(t, err)
+	err = EventStreamPublisher(p)(conn)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -576,11 +589,13 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 	require.Equal(t, "svc", published.msg.Headers["service"])
 	require.Equal(t, "header", published.msg.Headers["x-header"])
 }
+
 func Test_QueuePublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage{}, "key"})
-	err := QueuePublisher(p, "destQueue")(conn)
+	p, err := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage2{}, "key2"})
+	require.NoError(t, err)
+	err = QueuePublisher(p, "destQueue")(conn)
 	require.NoError(t, err)
 
 	require.Equal(t, 0, len(channel.ExchangeDeclarations))
@@ -601,22 +616,25 @@ func Test_QueuePublisher_Ok(t *testing.T) {
 	require.Equal(t, 3, len(published.msg.Headers))
 	require.Equal(t, "svc", published.msg.Headers["service"])
 	require.Equal(t, "header", published.msg.Headers["x-header"])
-	require.Equal(t, "destQueue", published.msg.Headers["CC"].([]interface{})[0])
+	require.Equal(t, "destQueue", published.msg.Headers["CC"].([]any)[0])
 }
 
 func Test_Publisher_ReservedHeader(t *testing.T) {
-	p := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage{}, "key"})
-	err := p.Publish(TestMessage{Msg: "test"}, Header{"service", "header"})
+	p, err := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage2{}, "key2"})
+	require.NoError(t, err)
+	err = p.Publish(TestMessage{Msg: "test"}, Header{"service", "header"})
 	require.EqualError(t, err, "reserved key service used, please change to use another one")
 }
 
 func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "key"})
+	p, err := NewPublisher(Route{TestMessage{}, "key"})
+	require.NoError(t, err)
+
 	e := errors.New("failed to create exchange")
 	channel.ExchangeDeclarationError = &e
-	err := EventStreamPublisher(p)(conn)
+	err = EventStreamPublisher(p)(conn)
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to declare exchange events.topic.exchange: failed to create exchange")
 }
@@ -625,14 +643,16 @@ func Test_UseMessageLogger(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	logger := &MockLogger{}
-	p := NewPublisher(Route{TestMessage{}, "routingkey"})
+	p, err := NewPublisher(Route{TestMessage{}, "routingkey"})
+	require.NoError(t, err)
+
 	_ = conn.Start(
 		UseMessageLogger(logger.logger()),
 		ServicePublisher("service", p),
 	)
 	require.NotNil(t, conn.messageLogger)
 
-	err := p.Publish(TestMessage{"test", true})
+	err = p.Publish(TestMessage{"test", true})
 	require.NoError(t, err)
 	<-channel.Published
 
@@ -644,8 +664,10 @@ func Test_UseMessageLogger(t *testing.T) {
 func Test_UseMessageLogger_Nil(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "routingkey"})
-	err := conn.Start(
+	p, err := NewPublisher(Route{TestMessage{}, "routingkey"})
+	require.NoError(t, err)
+
+	err = conn.Start(
 		UseMessageLogger(nil),
 		ServicePublisher("service", p),
 	)
@@ -655,18 +677,20 @@ func Test_UseMessageLogger_Nil(t *testing.T) {
 func Test_UseMessageLogger_Default(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "routingkey"})
-	err := conn.Start(
+	p, err := NewPublisher(Route{TestMessage{}, "routingkey"})
+	require.NoError(t, err)
+
+	err = conn.Start(
 		ServicePublisher("service", p),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, conn.messageLogger)
 }
 
-func Test_EventStreamListener(t *testing.T) {
+func Test_EventStreamConsumer(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 	require.NoError(t, err)
@@ -683,10 +707,10 @@ func Test_EventStreamListener(t *testing.T) {
 	require.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
 }
 
-func Test_EventStreamListenerWithOptFunc(t *testing.T) {
+func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("suffix")))
 	require.NoError(t, err)
@@ -703,19 +727,19 @@ func Test_EventStreamListenerWithOptFunc(t *testing.T) {
 	require.Equal(t, Consumer{queue: "events.topic.exchange.queue.svc-suffix", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
 }
 
-func Test_EventStreamListenerWithFailingOptFunc(t *testing.T) {
+func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(EventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("")))
-	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.EventStreamListener.func1> failed, queuebinding setup function <gitlab.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
+	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.EventStreamConsumer.func1> failed, queuebinding setup function <github.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
 }
 
-func Test_ServiceRequestListener_Ok(t *testing.T) {
+func Test_ServiceRequestConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceRequestListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -734,22 +758,22 @@ func Test_ServiceRequestListener_Ok(t *testing.T) {
 	require.Equal(t, Consumer{queue: "svc.direct.exchange.request.queue", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
 }
 
-func Test_ServiceRequestListener_ExchangeDeclareError(t *testing.T) {
+func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	declareError := errors.New("failed")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceRequestListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
-	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.ServiceRequestListener.func1> failed, failed to create exchange svc.headers.exchange.response: failed")
+	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.ServiceRequestConsumer.func1> failed, failed to create exchange svc.headers.exchange.response: failed")
 }
 
-func Test_ServiceResponseListener_Ok(t *testing.T) {
+func Test_ServiceResponseConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceResponseListener("targetService", "key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -758,30 +782,30 @@ func Test_ServiceResponseListener_Ok(t *testing.T) {
 	require.Equal(t, ExchangeDeclaration{name: "targetService.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
 
 	require.Equal(t, 1, len(channel.QueueDeclarations))
-	require.Equal(t, QueueDeclaration{name: "svc.headers.exchange.response", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
+	require.Equal(t, QueueDeclaration{name: "targetService.headers.exchange.response.queue.svc", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
 
 	require.Equal(t, 1, len(channel.BindingDeclarations))
-	require.Equal(t, BindingDeclaration{queue: "svc.headers.exchange.response", noWait: false, exchange: "targetService.headers.exchange.response", key: "key", args: amqp.Table{headerService: "svc"}}, channel.BindingDeclarations[0])
+	require.Equal(t, BindingDeclaration{queue: "targetService.headers.exchange.response.queue.svc", noWait: false, exchange: "targetService.headers.exchange.response", key: "key", args: amqp.Table{headerService: "svc"}}, channel.BindingDeclarations[0])
 
 	require.Equal(t, 1, len(channel.Consumers))
-	require.Equal(t, Consumer{queue: "svc.headers.exchange.response", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
+	require.Equal(t, Consumer{queue: "targetService.headers.exchange.response.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}, channel.Consumers[0])
 }
 
-func Test_ServiceResponseListener_ExchangeDeclareError(t *testing.T) {
+func Test_ServiceResponseConsumer_ExchangeDeclareError(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	declareError := errors.New("failed")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceResponseListener("targetService", "key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := conn.Start(ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
-	require.EqualError(t, err, "setup function <gitlab.com/sparetimecoders/goamqp.ServiceResponseListener.func1> failed, failed")
+	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.ServiceResponseConsumer.func1> failed, failed")
 }
 func Test_RequestResponseHandler(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := RequestResponseHandler("key", func(msg interface{}, headers Headers) (response interface{}, err error) {
+	err := RequestResponseHandler("key", func(msg any, headers Headers) (response any, err error) {
 		return nil, nil
 	}, Message{})(conn)
 	require.NoError(t, err)
@@ -805,15 +829,16 @@ func Test_RequestResponseHandler(t *testing.T) {
 	require.Equal(t, "svc.direct.exchange.request.queue", invoker.Queue)
 	require.Equal(t, "key", invoker.RoutingKey)
 	require.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
-	require.Equal(t, "gitlab.com/sparetimecoders/goamqp.ResponseWrapper.func1", runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name())
+	require.Equal(t, "github.com/sparetimecoders/goamqp.responseWrapper.func1", runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name())
 }
 
 func Test_ServicePublisher_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "key"})
+	p, err := NewPublisher(Route{TestMessage{}, "key"})
+	require.NoError(t, err)
 
-	err := ServicePublisher("svc", p)(conn)
+	err = ServicePublisher("svc", p)(conn)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -832,9 +857,10 @@ func Test_ServicePublisher_Ok(t *testing.T) {
 func Test_ServicePublisher_Multiple(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage2{}, "key2"})
+	p, err := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage2{}, "key2"})
+	require.NoError(t, err)
 
-	err := ServicePublisher("svc", p)(conn)
+	err = ServicePublisher("svc", p)(conn)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -864,9 +890,10 @@ func Test_ServicePublisher_Multiple(t *testing.T) {
 func Test_ServicePublisher_NoMatchingRoute(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	p := NewPublisher(Route{TestMessage2{}, "key"})
+	p, err := NewPublisher(Route{TestMessage2{}, "key"})
+	require.NoError(t, err)
 
-	err := ServicePublisher("svc", p)(conn)
+	err = ServicePublisher("svc", p)(conn)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -885,36 +912,19 @@ func Test_ServicePublisher_ExchangeDeclareFail(t *testing.T) {
 	channel.ExchangeDeclarationError = &e
 	conn := mockConnection(channel)
 
-	p := NewPublisher(Route{TestMessage{}, "key"})
-	err := ServicePublisher("svc", p)(conn)
+	p, err := NewPublisher(Route{TestMessage{}, "key"})
+	require.NoError(t, err)
+
+	err = ServicePublisher("svc", p)(conn)
 	require.Error(t, err)
 	require.EqualError(t, err, e.Error())
 }
 
-//func Test_RequestResponseHandler(t *testing.T) {
-//	channel := NewMockAmqpChannel()
-//	conn := mockConnection(channel)
-//	handlerErr := RequestResponseHandler("key", func(i interface{}) (interface{}, bool) {
-//		return Message{}, true
-//	}, reflect.TypeOf(Message{}))(conn)
-//	require.NoError(t, handlerErr)
-//
-//	require.Equal(t, 2, len(channel.ExchangeDeclarations))
-//	require.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
-//	require.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: amqp.Table{}}, channel.ExchangeDeclarations[1])
-//
-//	require.Equal(t, 1, len(channel.QueueDeclarations))
-//	require.Equal(t, QueueDeclaration{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
-//
-//	require.Equal(t, 1, len(channel.BindingDeclarations))
-//	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
-//}
-
-func Test_TransientEventStreamListener_Ok(t *testing.T) {
+func Test_TransientEventStreamConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := TransientEventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
@@ -937,11 +947,10 @@ func Test_TransientEventStreamListener_Ok(t *testing.T) {
 	require.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
 	require.Equal(t, "key", invoker.RoutingKey)
 	require.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", invoker.Queue)
-	//require.Equal(t, "", invoker.ResponseExchange)
 	require.Equal(t, key, invoker.queueRoutingKey)
 }
 
-func Test_TransientEventStreamListener_HandlerForRoutingKeyAlreadyExists(t *testing.T) {
+func Test_TransientEventStreamConsumer_HandlerForRoutingKeyAlreadyExists(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	key := queueRoutingKey{
@@ -951,26 +960,26 @@ func Test_TransientEventStreamListener_HandlerForRoutingKeyAlreadyExists(t *test
 	conn.handlers[key] = messageHandlerInvoker{}
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := TransientEventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
 	require.EqualError(t, err, "routingkey key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f already assigned to handler for type %!s(<nil>), cannot assign goamqp.Message, consider using AddQueueNameSuffix")
 }
 
-func Test_TransientEventStreamListener_ExchangeDeclareFails(t *testing.T) {
+func Test_TransientEventStreamConsumer_ExchangeDeclareFails(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	e := errors.New("failed")
 	channel.ExchangeDeclarationError = &e
 
-	testTransientEventStreamListenerFailure(t, channel, e.Error())
+	testTransientEventStreamConsumerFailure(t, channel, e.Error())
 }
 
-func Test_TransientEventStreamListener_QueueDeclareFails(t *testing.T) {
+func Test_TransientEventStreamConsumer_QueueDeclareFails(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	e := errors.New("failed to create queue")
 	channel.QueueDeclarationError = &e
-	testTransientEventStreamListenerFailure(t, channel, e.Error())
+	testTransientEventStreamConsumerFailure(t, channel, e.Error())
 }
 
 func TestEmptyQueueNameSuffix(t *testing.T) {
@@ -983,11 +992,11 @@ func TestQueueNameSuffix(t *testing.T) {
 	require.Equal(t, "queue-suffix", cfg.queueName)
 }
 
-func testTransientEventStreamListenerFailure(t *testing.T, channel *MockAmqpChannel, expectedError string) {
+func testTransientEventStreamConsumerFailure(t *testing.T, channel *MockAmqpChannel, expectedError string) {
 	conn := mockConnection(channel)
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamListener("key", func(i interface{}, headers Headers) (interface{}, error) {
+	err := TransientEventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
@@ -1010,10 +1019,10 @@ type Message struct {
 
 type mockPublisher struct {
 	err       error
-	published interface{}
+	published any
 }
 
-func (m *mockPublisher) publish(targetService, routingKey string, msg interface{}) error {
+func (m *mockPublisher) publish(targetService, routingKey string, msg any) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -1021,6 +1030,6 @@ func (m *mockPublisher) publish(targetService, routingKey string, msg interface{
 	return nil
 }
 
-func (m *mockPublisher) checkPublished(t *testing.T, i interface{}) {
+func (m *mockPublisher) checkPublished(t *testing.T, i any) {
 	require.EqualValues(t, m.published, i)
 }

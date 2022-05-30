@@ -1,23 +1,46 @@
+// MIT License
+//
+// Copyright (c) 2019 sparetimecoders
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 package goamqp
 
 import (
 	"fmt"
+
 	"github.com/pkg/errors"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // Header represent meta-data  for the message
 // This is backed by an amqp.Table so the same restrictions regarding the type allowed for Value applies
 type Header struct {
 	Key   string
-	Value interface{}
+	Value any
 }
 
 // Headers represent all meta-data for the message
-type Headers map[string]interface{}
+type Headers map[string]any
 
 // Get returns the header value for key, or nil if not present
-func (h Headers) Get(key string) interface{} {
+func (h Headers) Get(key string) any {
 	if v, ok := h[key]; ok {
 		return v
 	}

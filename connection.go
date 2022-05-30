@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2019 sparetimecoders
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 package goamqp
 
 import (
@@ -11,38 +33,40 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// Setup is a setup function that takes a Connection and use it to setup AMQP
+// Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
 
 //HandlerFunc is used to process an incoming message
 // If processing fails, an error should be returned
-// The optional handlerResp is used automatically when setting up a RequestResponseHandler, otherwise ignored
-type HandlerFunc func(msg interface{}, headers Headers) (response interface{}, err error)
+// The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
+type HandlerFunc func(msg any, headers Headers) (response any, err error)
 
 // Route defines the routing key to be used for a message type
 type Route struct {
-	Type interface{}
+	Type any
 	Key  string
 }
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
-	started       bool
-	serviceName   string
-	config        AmqpConfig
-	connection    amqpConnection
-	channel       AmqpChannel
-	handlers      map[queueRoutingKey]messageHandlerInvoker
+	started     bool
+	serviceName string
+	config      AmqpConfig
+	connection  amqpConnection
+	channel     AmqpChannel
+	handlers    map[queueRoutingKey]messageHandlerInvoker
+	// messageLogger defaults to noOpMessageLogger, can be overridden with UseMessageLogger
 	messageLogger MessageLogger
-	log           Logger
+	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
+	errorLogF errorLogf
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
-type ServiceResponsePublisher func(targetService, routingKey string, msg interface{}) error
+type ServiceResponsePublisher func(targetService, routingKey string, msg any) error
 
 // QueueBindingConfig is a wrapper around the actual amqp queue configuration
 type QueueBindingConfig struct {
@@ -60,7 +84,7 @@ type QueueBindingConfig struct {
 type QueueBindingConfigSetup func(config *QueueBindingConfig) error
 
 // AddQueueNameSuffix appends the provided suffix to the queue name
-// Useful when multiple listeners are needed for a routing key in the same service
+// Useful when multiple consumers are needed for a routing key in the same service
 func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
 	return func(config *QueueBindingConfig) error {
 		if suffix == "" {
@@ -74,19 +98,13 @@ func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
 var (
 	// ErrEmptySuffix returned when an empty suffix is passed
 	ErrEmptySuffix = fmt.Errorf("empty queue suffix not allowed")
+	// ErrAlreadyStarted returned when Start is called multiple times
+	ErrAlreadyStarted = fmt.Errorf("already started")
+	// ErrIllegalEventType is returned when an illegal type is passed
+	ErrIllegalEventType = fmt.Errorf("passing reflect.TypeOf event types is not allowed")
+	// ErrNilLogger is returned if nil is passed as a logger func
+	ErrNilLogger = errors.New("cannot use nil as logger func")
 )
-
-// SendingService returns the name of the service that produced the message
-// Can be used to send a handlerResponse, see PublishServiceResponse
-func SendingService(headers Headers) (string, error) {
-	if h, exist := headers[headerService]; exist {
-		switch v := h.(type) {
-		case string:
-			return v, nil
-		}
-	}
-	return "", errors.New("no service found")
-}
 
 // NewFromURL creates a new Connection from an URL
 func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
@@ -100,6 +118,17 @@ func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
 // New creates a new Connection from config
 func New(serviceName string, config AmqpConfig) *Connection {
 	return newConnection(serviceName, config)
+}
+
+// Must is a helper that wraps a call to a function returning (*T, error)
+// and panics if the error is non-nil. It is intended for use in variable
+// initializations such as
+// var c = goamqp.Must(goamqp.NewFromURL("service", "amqp://"))
+func Must[T any](t *T, err error) *T {
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 // CloseListener receives a callback when the AMQP Channel gets closed
@@ -118,13 +147,13 @@ func CloseListener(e chan error) Setup {
 	}
 }
 
-// UseLogger allows a Logger to be used to log errors during processing of messages
-func UseLogger(logger Logger) Setup {
+// UseLogger allows an errorLogf to be used to log errors during processing of messages
+func UseLogger(logger errorLogf) Setup {
 	return func(c *Connection) error {
 		if logger == nil {
-			return errors.New("cannot use nil as Logger")
+			return ErrNilLogger
 		}
-		c.log = logger
+		c.errorLogF = logger
 		return nil
 	}
 }
@@ -133,7 +162,7 @@ func UseLogger(logger Logger) Setup {
 func UseMessageLogger(logger MessageLogger) Setup {
 	return func(c *Connection) error {
 		if logger == nil {
-			return errors.New("cannot use nil as MessageLogger")
+			return ErrNilLogger
 		}
 		c.messageLogger = logger
 		return nil
@@ -141,17 +170,30 @@ func UseMessageLogger(logger MessageLogger) Setup {
 }
 
 // WithPrefetchLimit configures the number of messages to prefetch from the server.
+// To get round-robin behavior between consumers consuming from the same queue on
+// different connections, set the prefetch count to 1, and the next available
+// message on the server will be delivered to the next available consumer.
+// If your consumer work time is reasonably consistent and not much greater
+// than two times your network round trip time, you will see significant
+// throughput improvements starting with a prefetch count of 2 or slightly
+// greater, as described by benchmarks on RabbitMQ.
+//
+// http://www.rabbitmq.com/blog/2012/04/25/rabbitmq-performance-measurements-part-2/
 func WithPrefetchLimit(limit int) Setup {
 	return func(conn *Connection) error {
 		return conn.channel.Qos(limit, 0, true)
 	}
 }
 
-// TransientEventStreamListener sets up ap a event stream listener that will get removed when the connection is closed
-// TODO Document how messages flow, reference docs.md?
-func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventType interface{}) Setup {
-	eventTyp := getEventType(eventType)
+// TransientEventStreamConsumer sets up an event stream consumer that will clean up resources when the
+// connection is closed.
+// For a durable queue, use the EventStreamConsumer function instead.
+func TransientEventStreamConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
 	return func(c *Connection) error {
+		eventTyp, err := getEventType(eventType)
+		if err != nil {
+			return err
+		}
 		queueName := serviceEventRandomQueueName(c.serviceName)
 		exchangeName := eventsExchangeName()
 		if err := c.addHandler(queueName, routingKey, eventTyp, messageHandlerInvoker{
@@ -175,11 +217,14 @@ func TransientEventStreamListener(routingKey string, handler HandlerFunc, eventT
 	}
 }
 
-// EventStreamListener sets up ap a durable, persistent event stream listener
-// TODO Document how messages flow, reference docs.md?
-func EventStreamListener(routingKey string, handler HandlerFunc, eventType interface{}, opts ...QueueBindingConfigSetup) Setup {
-	eventTyp := getEventType(eventType)
+// EventStreamConsumer sets up ap a durable, persistent event stream consumer.
+// For a transient queue, use the TransientEventStreamConsumer function instead.
+func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
 	return func(c *Connection) error {
+		eventTyp, err := getEventType(eventType)
+		if err != nil {
+			return err
+		}
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
 			handler:      handler,
@@ -199,17 +244,7 @@ func EventStreamListener(routingKey string, handler HandlerFunc, eventType inter
 	}
 }
 
-func getEventType(eventType interface{}) eventType {
-	if t, ok := eventType.(reflect.Type); ok {
-		// Backward compatibility
-		fmt.Println("passing reflect.TypeOf event types is deprecated and will return error in future releases")
-		return t
-	}
-	return reflect.TypeOf(eventType)
-}
-
-// EventStreamPublisher sets up ap a event stream publisher
-// TODO Document how messages flow, reference docs.md?
+// EventStreamPublisher sets up an event stream publisher
 func EventStreamPublisher(publisher *Publisher) Setup {
 	return func(c *Connection) error {
 		if err := c.exchangeDeclare(c.channel, eventsExchangeName(), kindTopic); err != nil {
@@ -231,7 +266,7 @@ func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 	return func(c *Connection) error {
 		publisher.connection = c
 		if err := publisher.setDefaultHeaders(c.serviceName,
-			Header{Key: "CC", Value: []interface{}{destinationQueueName}},
+			Header{Key: "CC", Value: []any{destinationQueueName}},
 		); err != nil {
 			return err
 		}
@@ -240,17 +275,19 @@ func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 	}
 }
 
-// ServiceResponseListener is a specialization of EventStreamListener
-// It sets up ap a durable, persistent listener (exchange->queue) for responses from targetService
-// TODO Document how messages flow, reference docs.md?
-func ServiceResponseListener(targetService, routingKey string, handler HandlerFunc, eventType interface{}) Setup {
-	eventTyp := getEventType(eventType)
+// ServiceResponseConsumer is a specialization of EventStreamConsumer
+// It sets up ap a durable, persistent consumer (exchange->queue) for responses from targetService
+func ServiceResponseConsumer(targetService, routingKey string, handler HandlerFunc, eventType any) Setup {
 	return func(c *Connection) error {
+		eventTyp, err := getEventType(eventType)
+		if err != nil {
+			return err
+		}
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
 			handler:      handler,
 			eventType:    eventTyp,
-			queueName:    serviceResponseExchangeName(c.serviceName),
+			queueName:    serviceResponseQueueName(targetService, c.serviceName),
 			exchangeName: serviceResponseExchangeName(targetService),
 			kind:         kindHeaders,
 			headers:      amqp.Table{headerService: c.serviceName},
@@ -260,13 +297,14 @@ func ServiceResponseListener(targetService, routingKey string, handler HandlerFu
 	}
 }
 
-// ServiceRequestListener is a specialization of EventStreamListener
-// It sets up ap a durable, persistent listener (exchange->queue) for message to the service owning the Connection
-// TODO Document how messages flow, reference docs.md?
-func ServiceRequestListener(routingKey string, handler HandlerFunc, eventType interface{}) Setup {
-	eventTyp := getEventType(eventType)
+// ServiceRequestConsumer is a specialization of EventStreamConsumer
+// It sets up ap a durable, persistent consumer (exchange->queue) for message to the service owning the Connection
+func ServiceRequestConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
 	return func(c *Connection) error {
-
+		eventTyp, err := getEventType(eventType)
+		if err != nil {
+			return err
+		}
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
 		if err := c.exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
 			return errors.Wrapf(err, "failed to create exchange %s", resExchangeName)
@@ -287,7 +325,6 @@ func ServiceRequestListener(routingKey string, handler HandlerFunc, eventType in
 }
 
 // ServicePublisher sets up ap a publisher, that sends messages to the targetService
-// TODO Document how messages flow, reference docs.md?
 func ServicePublisher(targetService string, publisher *Publisher) Setup {
 	return func(c *Connection) error {
 		reqExchangeName := serviceRequestExchangeName(targetService)
@@ -303,34 +340,12 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 	}
 }
 
-// RequestResponseHandler is a convenience func to setup ServiceRequestListener and combines it with PublishServiceResponse
-// TODO Document how messages flow, reference docs.md?
-func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType interface{}) Setup {
+// RequestResponseHandler is a convenience func to set up ServiceRequestConsumer and combines it with
+// PublishServiceResponse
+func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType any) Setup {
 	return func(c *Connection) error {
-		responseHandlerWrapper := ResponseWrapper(handler, routingKey, c.PublishServiceResponse)
-		return ServiceRequestListener(routingKey, responseHandlerWrapper, eventType)(c)
-	}
-}
-
-// ResponseWrapper is...TODO make this internal?
-func ResponseWrapper(handler HandlerFunc, routingKey string, publisher ServiceResponsePublisher) HandlerFunc {
-	return func(msg interface{}, headers Headers) (response interface{}, err error) {
-		resp, err := handler(msg, headers)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to process message")
-		}
-		if resp != nil {
-			service, err := SendingService(headers)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to extract service name")
-			}
-			err = publisher(service, routingKey, resp)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to publish response")
-			}
-			return resp, nil
-		}
-		return nil, nil
+		responseHandlerWrapper := responseWrapper(handler, routingKey, c.publishServiceResponse)
+		return ServiceRequestConsumer(routingKey, responseHandlerWrapper, eventType)(c)
 	}
 }
 
@@ -342,19 +357,13 @@ func PublishNotify(confirm chan amqp.Confirmation) Setup {
 	}
 }
 
-// PublishServiceResponse sends a message to targetService as a handlerResp
-// TODO Document how messages flow, reference docs.md?
-func (c *Connection) PublishServiceResponse(targetService, routingKey string, msg interface{}) error {
-	return c.publishMessage(msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
-}
-
 // Start setups the amqp queues and exchanges defined by opts
 func (c *Connection) Start(opts ...Setup) error {
 	if c.started {
-		return fmt.Errorf("already started")
+		return ErrAlreadyStarted
 	}
-	c.messageLogger = NoOpMessageLogger()
-	c.log = &noOpLogger{}
+	c.messageLogger = noOpMessageLogger()
+	c.errorLogF = noOpLogger
 	if c.channel == nil {
 		err := c.connectToAmqpURL()
 		if err != nil {
@@ -398,6 +407,16 @@ type AmqpChannel interface {
 	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
 	NotifyClose(c chan *amqp.Error) chan *amqp.Error
 	Confirm(noWait bool) error
+	// Qos controls how many messages or how many bytes the server will try to keep on
+	// the network for consumers before receiving delivery acks.  The intent of Qos is
+	// to make sure the network buffers stay full between the server and client.
+	// If your consumer work time is reasonably consistent and not much greater
+	// than two times your network round trip time, you will see significant
+	// throughput improvements starting with a prefetch count of 2 or slightly
+	// greater as described by benchmarks on RabbitMQ.
+	//
+	// http://www.rabbitmq.com/blog/2012/04/25/rabbitmq-performance-measurements-part-2/
+	// The default prefetchCount is 20 (and global true) and can be overridden with WithPrefetchLimit
 	Qos(prefetchCount, prefetchSize int, global bool) error
 }
 
@@ -418,12 +437,33 @@ func amqpVersion() string {
 	// NOTE: this doesn't work outside of a build, se we can't really test it
 	if x, ok := debug.ReadBuildInfo(); ok {
 		for _, y := range x.Deps {
-			if y.Path == "gitlab.com/sparetimecoders/goamqp" {
+			if y.Path == "github.com/sparetimecoders/goamqp" {
 				return y.Version
 			}
 		}
 	}
 	return "_unknown_"
+}
+
+func responseWrapper(handler HandlerFunc, routingKey string, publisher ServiceResponsePublisher) HandlerFunc {
+	return func(msg any, headers Headers) (response any, err error) {
+		resp, err := handler(msg, headers)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to process message")
+		}
+		if resp != nil {
+			service, err := sendingService(headers)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to extract service name")
+			}
+			err = publisher(service, routingKey, resp)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to publish response")
+			}
+			return resp, nil
+		}
+		return nil, nil
+	}
 }
 
 func consume(channel AmqpChannel, queue string) (<-chan amqp.Delivery, error) {
@@ -526,13 +566,13 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 		if _, err := handler(message, headers(d.Headers)); err == nil {
 			_ = d.Ack(false)
 		} else {
-			c.log.Errorf("failed to process message %s", err)
+			c.errorLogF("failed to process message %s", err)
 			_ = d.Nack(false, true)
 		}
 	}
 }
 
-func (c *Connection) parseMessage(jsonContent []byte, eventType eventType, routingKey string) (interface{}, error) {
+func (c *Connection) parseMessage(jsonContent []byte, eventType eventType, routingKey string) (any, error) {
 	c.messageLogger(jsonContent, eventType, routingKey, false)
 	target := reflect.New(eventType).Interface()
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
@@ -542,7 +582,7 @@ func (c *Connection) parseMessage(jsonContent []byte, eventType eventType, routi
 	return target, nil
 }
 
-func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName string, headers amqp.Table) error {
+func (c *Connection) publishMessage(msg any, routingKey, exchangeName string, headers amqp.Table) error {
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -562,6 +602,11 @@ func (c *Connection) publishMessage(msg interface{}, routingKey, exchangeName st
 		false,
 		publishing,
 	)
+}
+
+// publishServiceResponse sends a message to targetService as a handler response
+func (c *Connection) publishServiceResponse(targetService, routingKey string, msg any) error {
+	return c.publishMessage(msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
 }
 
 func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
@@ -639,6 +684,13 @@ func (c *Connection) setup() error {
 	return nil
 }
 
+func getEventType(eventType any) (eventType, error) {
+	if _, ok := eventType.(reflect.Type); ok {
+		return nil, ErrIllegalEventType
+	}
+	return reflect.TypeOf(eventType), nil
+}
+
 type eventType reflect.Type
 
 type routes map[reflect.Type]string
@@ -654,10 +706,24 @@ type messageHandlerInvoker struct {
 	eventType eventType
 }
 
+// getSetupFuncName returns the name of the Setup function
 func getSetupFuncName(f Setup) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
+// getQueueBindingConfigSetupFuncName returns the name of the QueueBindingConfigSetup function
 func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
+}
+
+// sendingService returns the name of the service that produced the message
+// Can be used to send a handlerResponse, see PublishServiceResponse
+func sendingService(headers Headers) (string, error) {
+	if h, exist := headers[headerService]; exist {
+		switch v := h.(type) {
+		case string:
+			return v, nil
+		}
+	}
+	return "", errors.New("no service found")
 }

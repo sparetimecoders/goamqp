@@ -1,10 +1,32 @@
+// MIT License
+//
+// Copyright (c) 2019 sparetimecoders
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 package goamqp
 
 import (
 	"fmt"
 	"reflect"
 
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // Publisher is used to send messages
@@ -16,20 +38,24 @@ type Publisher struct {
 }
 
 // NewPublisher returns a publisher that can be used to send messages
-func NewPublisher(routes ...Route) *Publisher {
+func NewPublisher(routes ...Route) (*Publisher, error) {
 	r := make(map[reflect.Type]string)
+
 	for _, route := range routes {
-		r[reflect.TypeOf(route.Type)] = route.Key
+		typ := reflect.TypeOf(route.Type)
+		if key, exists := r[typ]; exists {
+			return nil, fmt.Errorf("type %s already assigned to routingkey %s, cannot assign routingkey %s", typ, key, route.Key)
+		}
+		r[typ] = route.Key
 	}
 
 	return &Publisher{
 		typeToRoutingKey: r,
-	}
+	}, nil
 }
 
 // Publish publishes a message to a given exchange
-// TODO Document how messages flow, reference docs.md?
-func (p *Publisher) Publish(msg interface{}, headers ...Header) error {
+func (p *Publisher) Publish(msg any, headers ...Header) error {
 	table := amqp.Table{}
 	for _, v := range p.defaultHeaders {
 		table[v.Key] = v.Value
