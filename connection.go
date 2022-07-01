@@ -344,9 +344,14 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 // PublishServiceResponse
 func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType any) Setup {
 	return func(c *Connection) error {
-		responseHandlerWrapper := responseWrapper(handler, routingKey, c.publishServiceResponse)
+		responseHandlerWrapper := responseWrapper(handler, routingKey, c.PublishServiceResponse)
 		return ServiceRequestConsumer(routingKey, responseHandlerWrapper, eventType)(c)
 	}
+}
+
+// PublishServiceResponse sends a message to targetService as a handler response
+func (c *Connection) PublishServiceResponse(targetService, routingKey string, msg any) error {
+	return c.publishMessage(msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
 }
 
 // PublishNotify see amqp.Channel.Confirm
@@ -602,11 +607,6 @@ func (c *Connection) publishMessage(msg any, routingKey, exchangeName string, he
 		false,
 		publishing,
 	)
-}
-
-// publishServiceResponse sends a message to targetService as a handler response
-func (c *Connection) publishServiceResponse(targetService, routingKey string, msg any) error {
-	return c.publishMessage(msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
 }
 
 func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
