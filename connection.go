@@ -40,7 +40,7 @@ import (
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
 
-//HandlerFunc is used to process an incoming message
+// HandlerFunc is used to process an incoming message
 // If processing fails, an error should be returned
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
 type HandlerFunc func(msg any, headers Headers) (response any, err error)
@@ -506,11 +506,11 @@ func transientQueueDeclare(channel AmqpChannel, name string) error {
 }
 
 func amqpConfig(serviceName string) amqp.Config {
-	return amqp.Config{
-		Properties: amqp.Table{
-			"connection_name": fmt.Sprintf("%s#%+v#@%s", serviceName, amqpVersion(), hostName()),
-		},
+	config := amqp.Config{
+		Properties: amqp.NewConnectionProperties(),
 	}
+	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, amqpVersion(), hostName()))
+	return config
 }
 
 func hostName() string {
