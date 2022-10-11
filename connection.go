@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,7 +42,7 @@ import (
 type Setup func(conn *Connection) error
 
 // HandlerFunc is used to process an incoming message
-// If processing fails, an error should be returned
+// If processing fails, an error should be returned and the message will be re-queued
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
 type HandlerFunc func(msg any, headers Headers) (response any, err error)
 
@@ -363,7 +364,7 @@ func PublishNotify(confirm chan amqp.Confirmation) Setup {
 }
 
 // Start setups the amqp queues and exchanges defined by opts
-func (c *Connection) Start(opts ...Setup) error {
+func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {
 		return ErrAlreadyStarted
 	}
@@ -614,7 +615,7 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, ha
 		if h, ok := handlers[d.RoutingKey]; ok {
 			c.handleMessage(d, h.msgHandler, h.eventType, d.RoutingKey)
 		} else {
-			// Unhandled message
+			// Unhandled message, drop it
 			_ = d.Reject(false)
 		}
 	}

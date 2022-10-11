@@ -20,6 +20,7 @@
 package request_response
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -29,9 +30,9 @@ import (
 func ExampleRequestResponse() {
 	amqpURL := "amqp://user:password@localhost:5672/test"
 	routingKey := "key"
-
+	ctx := context.Background()
 	serviceConnection := Must(NewFromURL("service", amqpURL))
-	err := serviceConnection.Start(
+	err := serviceConnection.Start(ctx,
 		RequestResponseHandler(routingKey, handleRequest, Request{}),
 	)
 	checkError(err)
@@ -39,7 +40,7 @@ func ExampleRequestResponse() {
 	clientConnection := Must(NewFromURL("client", amqpURL))
 	publisher := Must(NewPublisher(Route{Type: Request{}, Key: routingKey}))
 
-	err = clientConnection.Start(
+	err = clientConnection.Start(ctx,
 		ServicePublisher("service", publisher),
 		ServiceResponseConsumer("service", routingKey, handleResponse, Response{}),
 	)
