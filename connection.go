@@ -56,7 +56,7 @@ type Route struct {
 type Connection struct {
 	started     bool
 	serviceName string
-	config      AmqpConfig
+	amqpUri     amqp.URI
 	connection  amqpConnection
 	channel     AmqpChannel
 	handlers    map[queueRoutingKey]messageHandlerInvoker
@@ -109,16 +109,11 @@ var (
 
 // NewFromURL creates a new Connection from an URL
 func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
-	amqpConfig, err := ParseAmqpURL(amqpURL)
+	uri, err := amqp.ParseURI(amqpURL)
 	if err != nil {
 		return nil, err
 	}
-	return newConnection(serviceName, amqpConfig), nil
-}
-
-// New creates a new Connection from config
-func New(serviceName string, config AmqpConfig) *Connection {
-	return newConnection(serviceName, config)
+	return newConnection(serviceName, uri), nil
 }
 
 // Must is a helper that wraps a call to a function returning (*T, error)
@@ -509,6 +504,8 @@ func transientQueueDeclare(channel AmqpChannel, name string) error {
 func amqpConfig(serviceName string) amqp.Config {
 	config := amqp.Config{
 		Properties: amqp.NewConnectionProperties(),
+		Heartbeat:  10 * time.Second,
+		Locale:     "en_US",
 	}
 	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, amqpVersion(), hostName()))
 	return config
@@ -525,7 +522,7 @@ func hostName() string {
 func (c *Connection) connectToAmqpURL() error {
 	cfg := amqpConfig(c.serviceName)
 
-	conn, err := dialAmqp(c.config.AmqpURL(), cfg)
+	conn, err := dialAmqp(c.amqpUri.String(), cfg)
 	if err != nil {
 		return err
 	}
@@ -656,10 +653,10 @@ const contentType = "application/json"
 var deleteQueueAfter = 5 * 24 * time.Hour
 var queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
 
-func newConnection(serviceName string, config AmqpConfig) *Connection {
+func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
 		serviceName: serviceName,
-		config:      config,
+		amqpUri:     uri,
 		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
 	}
 }

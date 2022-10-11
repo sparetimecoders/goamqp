@@ -239,7 +239,7 @@ var _ amqpConnection = &MockAmqpConnection{}
 var _ AmqpChannel = &MockAmqpChannel{}
 
 func mockConnection(channel *MockAmqpChannel) *Connection {
-	c := newConnection("svc", AmqpConfig{})
+	c := newConnection("svc", amqp.URI{})
 	c.channel = channel
 	c.connection = &MockAmqpConnection{}
 	c.messageLogger = noOpMessageLogger()

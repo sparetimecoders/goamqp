@@ -213,14 +213,9 @@ func Test_ConnectToAmqpUrl_Ok(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return mockAmqpConnection, nil
 	}
-	conn := Connection{config: AmqpConfig{
-		Username: "user",
-		Password: "password",
-		Host:     "localhost",
-		Port:     12345,
-		VHost:    "vhost",
-	}}
-	err := conn.connectToAmqpURL()
+	conn, err := NewFromURL("", "amqp://user:password@localhost:12345/vhost")
+	require.NoError(t, err)
+	err = conn.connectToAmqpURL()
 	require.NoError(t, err)
 	require.Equal(t, mockAmqpConnection, conn.connection)
 	require.NotNil(t, conn.channel)
@@ -260,23 +255,10 @@ func Test_FailingSetupFunc(t *testing.T) {
 	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.Test_FailingSetupFunc.func2> failed, error message")
 }
 
-func Test_NewFromURL_InvalidURL(t *testing.T) {
-	c, err := NewFromURL("test", "amqp://")
-	require.Nil(t, c)
-	require.EqualError(t, err, "connection url is invalid, amqp://")
-}
-
 func Test_NewFromURL_ValidURL(t *testing.T) {
 	c, err := NewFromURL("test", "amqp://user:password@localhost:5672/")
 	require.NotNil(t, c)
 	require.NoError(t, err)
-}
-
-func Test_NewFromConfig(t *testing.T) {
-	config, err := ParseAmqpURL("amqp://user:password@localhost:5672/")
-	require.NoError(t, err)
-	c := New("test", config)
-	require.NotNil(t, c)
 }
 
 func Test_AmqpConfig(t *testing.T) {
