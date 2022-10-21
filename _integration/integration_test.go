@@ -23,6 +23,7 @@
 package _integration
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
@@ -116,6 +117,7 @@ func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 		Arguments:       struct{}{},
 	}}, bindings)
 }
+
 func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	closer := make(chan bool)
 	var serverReceived *Incoming
@@ -175,7 +177,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	// Verify queues and bindings
 	serverQueue, err := suite.admin.GetQueue("server.direct.exchange.request.queue")
 	require.NoError(suite.T(), err)
-	clientQueue, err := suite.admin.GetQueue("client.headers.exchange.response")
+	clientQueue, err := suite.admin.GetQueue("server.headers.exchange.response.queue.client")
 	require.NoError(suite.T(), err)
 
 	require.Equal(suite.T(), &Queue{
@@ -210,17 +212,17 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
-		Name:                 "client.headers.exchange.response",
+		Name:                 "server.headers.exchange.response.queue.client",
 		Vhost:                suite.admin.vhost,
 	}, clientQueue)
 
-	responseBinding, err := suite.admin.GetBindings("client.headers.exchange.response", true)
+	responseBinding, err := suite.admin.GetBindings("server.headers.exchange.response.queue.client", true)
 	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), []Binding{
 		{
 			Source:          "server.headers.exchange.response",
 			Vhost:           suite.admin.vhost,
-			Destination:     "client.headers.exchange.response",
+			Destination:     "server.headers.exchange.response.queue.client",
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
 			Arguments:       struct{}{},
@@ -232,11 +234,12 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	closer := make(chan bool, 2)
 	routingKey := "key1"
 	clientQuery := "test"
-	publish, err := NewPublisher(
-		Route{
-			Type: Incoming{},
-			Key:  routingKey,
-		})
+	publish, err := NewPublisher2(Incoming{})
+	//publish, err := NewPublisher(
+	//	Route{
+	//		Type: Incoming{},
+	//		Key:  routingKey,
+	//	})
 	require.NoError(suite.T(), err)
 	server := createConnection(suite, serverServiceName,
 		EventStreamPublisher(publish))
@@ -459,7 +462,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 func createConnection(suite *IntegrationTestSuite, serviceName string, opts ...Setup) *Connection {
 	conn, err := NewFromURL(serviceName, fmt.Sprintf("%s/%s", amqpURL, suite.admin.vhost))
 	require.NoError(suite.T(), err)
-	err = conn.Start(opts...)
+	err = conn.Start(context.Background(), opts...)
 	require.NoError(suite.T(), err)
 	return conn
 }

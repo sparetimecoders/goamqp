@@ -562,7 +562,8 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType eventTyp
 }
 
 func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType, routingKey string) {
-	message, err := c.parseMessage(d.Body, eventType, routingKey)
+	c.messageLogger(d.Body, eventType, routingKey, false)
+	message, err := c.parseMessage(d.Body, eventType)
 	if err != nil {
 		_ = d.Reject(false)
 	} else {
@@ -575,8 +576,7 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 	}
 }
 
-func (c *Connection) parseMessage(jsonContent []byte, eventType eventType, routingKey string) (any, error) {
-	c.messageLogger(jsonContent, eventType, routingKey, false)
+func (c *Connection) parseMessage(jsonContent []byte, eventType eventType) (any, error) {
 	target := reflect.New(eventType).Interface()
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
 		return nil, err
