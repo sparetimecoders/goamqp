@@ -95,7 +95,7 @@ func (a *amqpAdmin) GetQueue(name string) (*Queue, error) {
 	if found, ok := find(name, queues); ok {
 		return &found, nil
 	}
-	return nil, fmt.Errorf("queue not found")
+	return nil, fmt.Errorf("queue %s not found", name)
 }
 
 func (a *amqpAdmin) GetQueues() ([]Queue, error) {

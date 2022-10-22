@@ -20,6 +20,7 @@
 package event_stream
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -31,21 +32,23 @@ var (
 )
 
 func ExampleEventStream() {
+	ctx := context.Background()
+
 	orderServiceConnection := Must(NewFromURL("order-service", amqpURL))
 	orderPublisher := Must(NewPublisher(
 		Route{Type: OrderCreated{}, Key: "Order.Created"},
 		Route{Type: OrderUpdated{}, Key: "Order.Updated"}))
-	err := orderServiceConnection.Start(
+	err := orderServiceConnection.Start(ctx,
 		EventStreamPublisher(orderPublisher),
 	)
 	checkError(err)
 
 	shippingService := ShippingService{}
-	err = shippingService.Start()
+	err = shippingService.Start(ctx)
 	checkError(err)
 
 	statService := StatService{}
-	err = statService.Start()
+	err = statService.Start(ctx)
 	checkError(err)
 
 	err = orderPublisher.Publish(OrderCreated{Id: "id"})
@@ -68,9 +71,9 @@ func (s *StatService) Stop() error {
 	return s.connection.Close()
 }
 
-func (s *StatService) Start() error {
+func (s *StatService) Start(ctx context.Context) error {
 	s.connection = Must(NewFromURL("stat-service", amqpURL))
-	return s.connection.Start(
+	return s.connection.Start(ctx,
 		EventStreamConsumer("Order.Created", s.handleOrderEvent, OrderCreated{}),
 	)
 }
@@ -96,9 +99,9 @@ func (s *ShippingService) Stop() error {
 	return s.connection.Close()
 }
 
-func (s *ShippingService) Start() error {
+func (s *ShippingService) Start(ctx context.Context) error {
 	s.connection = Must(NewFromURL("shipping-service", amqpURL))
-	return s.connection.Start(
+	return s.connection.Start(ctx,
 		EventStreamConsumer("Order.Created", s.handleOrderEvent, OrderCreated{}),
 		EventStreamConsumer("Order.Updated", s.handleOrderEvent, OrderUpdated{}),
 	)

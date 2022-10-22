@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,9 +76,9 @@ func Test_Start_MultipleCallsFails(t *testing.T) {
 		connection:  mockAmqpConnection,
 		channel:     mockChannel,
 	}
-	err := conn.Start()
+	err := conn.Start(context.Background())
 	require.NoError(t, err)
-	err = conn.Start()
+	err = conn.Start(context.Background())
 	require.Error(t, err)
 	require.EqualError(t, err, "already started")
 }
@@ -94,7 +95,7 @@ func Test_Start_SettingDefaultQosFails(t *testing.T) {
 		connection:  mockAmqpConnection,
 		channel:     mockChannel,
 	}
-	err := conn.Start()
+	err := conn.Start(context.Background())
 	require.Error(t, err)
 	require.EqualError(t, err, "error setting qos")
 }
@@ -112,7 +113,7 @@ func Test_Start_SetupFails(t *testing.T) {
 		channel:     mockChannel,
 		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
 	}
-	err := conn.Start(
+	err := conn.Start(context.Background(),
 		EventStreamConsumer("test", func(i any, headers Headers) (any, error) {
 			return nil, errors.New("failed")
 		}, Message{}))
@@ -142,7 +143,7 @@ func Test_Start_WithPrefetchLimit_Resets_Qos(t *testing.T) {
 		connection:  mockAmqpConnection,
 		channel:     mockChannel,
 	}
-	err := conn.Start(
+	err := conn.Start(context.Background(),
 		WithPrefetchLimit(1),
 	)
 	require.NoError(t, err)
@@ -156,7 +157,7 @@ func Test_Start_ConnectionFail(t *testing.T) {
 	}
 	conn, err := NewFromURL("", "amqp://user:password@localhost:67333/a")
 	require.NoError(t, err)
-	err = conn.Start()
+	err = conn.Start(context.Background())
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to connect")
 }
@@ -212,14 +213,9 @@ func Test_ConnectToAmqpUrl_Ok(t *testing.T) {
 	dialAmqp = func(url string, cfg amqp.Config) (amqpConnection, error) {
 		return mockAmqpConnection, nil
 	}
-	conn := Connection{config: AmqpConfig{
-		Username: "user",
-		Password: "password",
-		Host:     "localhost",
-		Port:     12345,
-		VHost:    "vhost",
-	}}
-	err := conn.connectToAmqpURL()
+	conn, err := NewFromURL("", "amqp://user:password@localhost:12345/vhost")
+	require.NoError(t, err)
+	err = conn.connectToAmqpURL()
 	require.NoError(t, err)
 	require.Equal(t, mockAmqpConnection, conn.connection)
 	require.NotNil(t, conn.channel)
@@ -255,27 +251,14 @@ func Test_ConnectToAmqpUrl_FailToGetChannel(t *testing.T) {
 func Test_FailingSetupFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(func(c *Connection) error { return nil }, func(c *Connection) error { return fmt.Errorf("error message") })
+	err := conn.Start(context.Background(), func(c *Connection) error { return nil }, func(c *Connection) error { return fmt.Errorf("error message") })
 	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.Test_FailingSetupFunc.func2> failed, error message")
-}
-
-func Test_NewFromURL_InvalidURL(t *testing.T) {
-	c, err := NewFromURL("test", "amqp://")
-	require.Nil(t, c)
-	require.EqualError(t, err, "connection url is invalid, amqp://")
 }
 
 func Test_NewFromURL_ValidURL(t *testing.T) {
 	c, err := NewFromURL("test", "amqp://user:password@localhost:5672/")
 	require.NotNil(t, c)
 	require.NoError(t, err)
-}
-
-func Test_NewFromConfig(t *testing.T) {
-	config, err := ParseAmqpURL("amqp://user:password@localhost:5672/")
-	require.NoError(t, err)
-	c := New("test", config)
-	require.NotNil(t, c)
 }
 
 func Test_AmqpConfig(t *testing.T) {
@@ -646,7 +629,7 @@ func Test_UseMessageLogger(t *testing.T) {
 	p, err := NewPublisher(Route{TestMessage{}, "routingkey"})
 	require.NoError(t, err)
 
-	_ = conn.Start(
+	_ = conn.Start(context.Background(),
 		UseMessageLogger(logger.logger()),
 		ServicePublisher("service", p),
 	)
@@ -667,7 +650,7 @@ func Test_UseMessageLogger_Nil(t *testing.T) {
 	p, err := NewPublisher(Route{TestMessage{}, "routingkey"})
 	require.NoError(t, err)
 
-	err = conn.Start(
+	err = conn.Start(context.Background(),
 		UseMessageLogger(nil),
 		ServicePublisher("service", p),
 	)
@@ -680,7 +663,7 @@ func Test_UseMessageLogger_Default(t *testing.T) {
 	p, err := NewPublisher(Route{TestMessage{}, "routingkey"})
 	require.NoError(t, err)
 
-	err = conn.Start(
+	err = conn.Start(context.Background(),
 		ServicePublisher("service", p),
 	)
 	require.NoError(t, err)
@@ -690,7 +673,7 @@ func Test_UseMessageLogger_Default(t *testing.T) {
 func Test_EventStreamConsumer(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 	require.NoError(t, err)
@@ -710,7 +693,7 @@ func Test_EventStreamConsumer(t *testing.T) {
 func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("suffix")))
 	require.NoError(t, err)
@@ -730,7 +713,7 @@ func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("")))
 	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.EventStreamConsumer.func1> failed, queuebinding setup function <github.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
@@ -739,7 +722,7 @@ func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 func Test_ServiceRequestConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -763,7 +746,7 @@ func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 	declareError := errors.New("failed")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -773,7 +756,7 @@ func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 func Test_ServiceResponseConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -796,7 +779,7 @@ func Test_ServiceResponseConsumer_ExchangeDeclareError(t *testing.T) {
 	declareError := errors.New("failed")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 

@@ -20,6 +20,7 @@
 package goamqp_test
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -27,12 +28,13 @@ import (
 )
 
 func Example() {
+	ctx := context.Background()
 
 	amqpURL := "amqp://user:password@localhost:5672/"
 	publisher := Must(NewPublisher(Route{Type: IncomingMessage{}, Key: "key"}))
 
 	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(
+	err := connection.Start(ctx,
 		EventStreamConsumer("key", process, IncomingMessage{}),
 		EventStreamPublisher(publisher),
 	)

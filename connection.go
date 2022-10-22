@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,7 +42,7 @@ import (
 type Setup func(conn *Connection) error
 
 // HandlerFunc is used to process an incoming message
-// If processing fails, an error should be returned
+// If processing fails, an error should be returned and the message will be re-queued
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
 type HandlerFunc func(msg any, headers Headers) (response any, err error)
 
@@ -55,7 +56,7 @@ type Route struct {
 type Connection struct {
 	started     bool
 	serviceName string
-	config      AmqpConfig
+	amqpUri     amqp.URI
 	connection  amqpConnection
 	channel     AmqpChannel
 	handlers    map[queueRoutingKey]messageHandlerInvoker
@@ -108,16 +109,11 @@ var (
 
 // NewFromURL creates a new Connection from an URL
 func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
-	amqpConfig, err := ParseAmqpURL(amqpURL)
+	uri, err := amqp.ParseURI(amqpURL)
 	if err != nil {
 		return nil, err
 	}
-	return newConnection(serviceName, amqpConfig), nil
-}
-
-// New creates a new Connection from config
-func New(serviceName string, config AmqpConfig) *Connection {
-	return newConnection(serviceName, config)
+	return newConnection(serviceName, uri), nil
 }
 
 // Must is a helper that wraps a call to a function returning (*T, error)
@@ -363,7 +359,7 @@ func PublishNotify(confirm chan amqp.Confirmation) Setup {
 }
 
 // Start setups the amqp queues and exchanges defined by opts
-func (c *Connection) Start(opts ...Setup) error {
+func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {
 		return ErrAlreadyStarted
 	}
@@ -508,6 +504,8 @@ func transientQueueDeclare(channel AmqpChannel, name string) error {
 func amqpConfig(serviceName string) amqp.Config {
 	config := amqp.Config{
 		Properties: amqp.NewConnectionProperties(),
+		Heartbeat:  10 * time.Second,
+		Locale:     "en_US",
 	}
 	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, amqpVersion(), hostName()))
 	return config
@@ -524,7 +522,7 @@ func hostName() string {
 func (c *Connection) connectToAmqpURL() error {
 	cfg := amqpConfig(c.serviceName)
 
-	conn, err := dialAmqp(c.config.AmqpURL(), cfg)
+	conn, err := dialAmqp(c.amqpUri.String(), cfg)
 	if err != nil {
 		return err
 	}
@@ -564,7 +562,8 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType eventTyp
 }
 
 func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType, routingKey string) {
-	message, err := c.parseMessage(d.Body, eventType, routingKey)
+	c.messageLogger(d.Body, eventType, routingKey, false)
+	message, err := c.parseMessage(d.Body, eventType)
 	if err != nil {
 		_ = d.Reject(false)
 	} else {
@@ -577,8 +576,7 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 	}
 }
 
-func (c *Connection) parseMessage(jsonContent []byte, eventType eventType, routingKey string) (any, error) {
-	c.messageLogger(jsonContent, eventType, routingKey, false)
+func (c *Connection) parseMessage(jsonContent []byte, eventType eventType) (any, error) {
 	target := reflect.New(eventType).Interface()
 	if err := json.Unmarshal(jsonContent, &target); err != nil {
 		return nil, err
@@ -614,7 +612,7 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, ha
 		if h, ok := handlers[d.RoutingKey]; ok {
 			c.handleMessage(d, h.msgHandler, h.eventType, d.RoutingKey)
 		} else {
-			// Unhandled message
+			// Unhandled message, drop it
 			_ = d.Reject(false)
 		}
 	}
@@ -655,10 +653,10 @@ const contentType = "application/json"
 var deleteQueueAfter = 5 * 24 * time.Hour
 var queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
 
-func newConnection(serviceName string, config AmqpConfig) *Connection {
+func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
 		serviceName: serviceName,
-		config:      config,
+		amqpUri:     uri,
 		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
 	}
 }

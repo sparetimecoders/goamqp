@@ -1,4 +1,4 @@
-name: "golang-ci-lint"
+name: "golang-vulnerabilities"
 
 on:
   push:
@@ -8,15 +8,10 @@ on:
     branches: [ main ]
 jobs:
   golangci:
-    name: lint
+    name: golang-vulnerabilities
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      - uses: opzkit/govulncheck-action@v1
         with:
           go-version-file: 'go.mod'
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
-        with:
-          args: --timeout=5m
