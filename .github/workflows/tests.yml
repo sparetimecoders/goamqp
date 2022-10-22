@@ -30,7 +30,7 @@ jobs:
           go test -p 1 -mod=readonly -race -v -tags integration -coverprofile=coverage.txt -covermode=atomic -coverpkg=$(go list ./... | tr '\n' , | sed 's/,$//') ./...
           go tool cover -func=coverage.txt
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3
         with:
           files: ./coverage.txt
           fail_ci_if_error: true
