@@ -8,10 +8,8 @@ on:
     branches:
       - "*"
 
-
 jobs:
-   build-linux:
-    name: build/test on ubuntu-latest
+   tests:
     runs-on: ubuntu-latest
     services:
       rabbitmq:
