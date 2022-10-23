@@ -46,7 +46,7 @@ func ExampleRequestResponse() {
 	)
 	checkError(err)
 
-	err = publisher.Publish(Request{Data: "test"})
+	err = publisher.PublishWithContext(context.Background(), Request{Data: "test"})
 	checkError(err)
 
 	time.Sleep(time.Second)

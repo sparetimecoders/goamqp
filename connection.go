@@ -67,7 +67,7 @@ type Connection struct {
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
-type ServiceResponsePublisher func(targetService, routingKey string, msg any) error
+type ServiceResponsePublisher func(ctx context.Context, targetService, routingKey string, msg any) error
 
 // QueueBindingConfig is a wrapper around the actual amqp queue configuration
 type QueueBindingConfig struct {
@@ -346,8 +346,8 @@ func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType an
 }
 
 // PublishServiceResponse sends a message to targetService as a handler response
-func (c *Connection) PublishServiceResponse(targetService, routingKey string, msg any) error {
-	return c.publishMessage(msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
+func (c *Connection) PublishServiceResponse(ctx context.Context, targetService, routingKey string, msg any) error {
+	return c.publishMessage(ctx, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
 }
 
 // PublishNotify see amqp.Channel.Confirm
@@ -403,7 +403,9 @@ type AmqpChannel interface {
 	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
+	// Deprecated: Use PublishWithContext instead.
 	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
+	PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
 	NotifyClose(c chan *amqp.Error) chan *amqp.Error
@@ -457,7 +459,9 @@ func responseWrapper(handler HandlerFunc, routingKey string, publisher ServiceRe
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to extract service name")
 			}
-			err = publisher(service, routingKey, resp)
+			// TODO Pass context to HandlerFunc instead and use here?
+			ctx := context.Background()
+			err = publisher(ctx, service, routingKey, resp)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to publish response")
 			}
@@ -585,7 +589,7 @@ func (c *Connection) parseMessage(jsonContent []byte, eventType eventType) (any,
 	return target, nil
 }
 
-func (c *Connection) publishMessage(msg any, routingKey, exchangeName string, headers amqp.Table) error {
+func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, exchangeName string, headers amqp.Table) error {
 	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -599,7 +603,7 @@ func (c *Connection) publishMessage(msg any, routingKey, exchangeName string, he
 		Headers:      headers,
 	}
 
-	return c.channel.Publish(exchangeName,
+	return c.channel.PublishWithContext(ctx, exchangeName,
 		routingKey,
 		false,
 		false,

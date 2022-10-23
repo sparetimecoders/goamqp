@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"errors"
 	"reflect"
 
@@ -178,6 +179,9 @@ func (m *MockAmqpChannel) ExchangeDeclare(name, kind string, durable, autoDelete
 	return nil
 }
 func (m *MockAmqpChannel) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
+	return m.PublishWithContext(context.Background(), exchange, key, mandatory, immediate, msg)
+}
+func (m *MockAmqpChannel) PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	if key == "failed" {
 		return errors.New("failed")
 	}

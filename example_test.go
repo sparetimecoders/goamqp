@@ -39,7 +39,7 @@ func Example() {
 		EventStreamPublisher(publisher),
 	)
 	checkError(err)
-	err = publisher.Publish(IncomingMessage{"OK"})
+	err = publisher.PublishWithContext(ctx, IncomingMessage{"OK"})
 	checkError(err)
 	time.Sleep(time.Second)
 	err = connection.Close()
