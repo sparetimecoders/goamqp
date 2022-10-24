@@ -51,9 +51,9 @@ func ExampleEventStream() {
 	err = statService.Start(ctx)
 	checkError(err)
 
-	err = orderPublisher.Publish(OrderCreated{Id: "id"})
+	err = orderPublisher.PublishWithContext(context.Background(), OrderCreated{Id: "id"})
 	checkError(err)
-	err = orderPublisher.Publish(OrderUpdated{Id: "id"})
+	err = orderPublisher.PublishWithContext(context.Background(), OrderUpdated{Id: "id"})
 	checkError(err)
 
 	time.Sleep(2 * time.Second)

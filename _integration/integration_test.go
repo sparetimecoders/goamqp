@@ -148,7 +148,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 		}, IncomingResponse{}))
 	defer client.Close()
 
-	err = publish.Publish(&Incoming{Query: clientQuery})
+	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
 	<-closer
@@ -234,12 +234,11 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	closer := make(chan bool, 2)
 	routingKey := "key1"
 	clientQuery := "test"
-	publish, err := NewPublisher2(Incoming{})
-	//publish, err := NewPublisher(
-	//	Route{
-	//		Type: Incoming{},
-	//		Key:  routingKey,
-	//	})
+	publish, err := NewPublisher(
+		Route{
+			Type: Incoming{},
+			Key:  routingKey,
+		})
 	require.NoError(suite.T(), err)
 	server := createConnection(suite, serverServiceName,
 		EventStreamPublisher(publish))
@@ -260,7 +259,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	}, Incoming{}))
 	defer client2.Close()
 
-	err = publish.Publish(&Incoming{Query: clientQuery})
+	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
 	go forceClose(closer, 3)
@@ -371,9 +370,9 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		}, IncomingResponse{}))
 	defer client1.Close()
 
-	err = publish.Publish(&Incoming{Query: clientQuery})
+	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
-	err = publish.Publish(&IncomingResponse{Value: clientQuery})
+	err = publish.PublishWithContext(context.Background(), &IncomingResponse{Value: clientQuery})
 	require.NoError(suite.T(), err)
 
 	go forceClose(closer, 3)

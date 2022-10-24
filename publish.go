@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -55,7 +56,12 @@ func NewPublisher(routes ...Route) (*Publisher, error) {
 }
 
 // Publish publishes a message to a given exchange
+// Deprecated: Use PublishWithContext instead.
 func (p *Publisher) Publish(msg any, headers ...Header) error {
+	return p.PublishWithContext(context.Background(), msg, headers...)
+}
+
+func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...Header) error {
 	table := amqp.Table{}
 	for _, v := range p.defaultHeaders {
 		table[v.Key] = v.Value
@@ -73,7 +79,7 @@ func (p *Publisher) Publish(msg any, headers ...Header) error {
 		key = t.Elem()
 	}
 	if key, ok := p.typeToRoutingKey[key]; ok {
-		return p.connection.publishMessage(msg, key, p.exchange, table)
+		return p.connection.publishMessage(ctx, msg, key, p.exchange, table)
 	}
 	return fmt.Errorf("no routingkey configured for message of type %s", t)
 }
