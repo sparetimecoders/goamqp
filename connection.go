@@ -358,6 +358,10 @@ func PublishNotify(confirm chan amqp.Confirmation) Setup {
 	}
 }
 
+func (c *Connection) URI() amqp.URI {
+	return c.amqpUri
+}
+
 // Start setups the amqp queues and exchanges defined by opts
 func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {

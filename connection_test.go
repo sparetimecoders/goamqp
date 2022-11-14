@@ -162,7 +162,7 @@ func Test_Start_ConnectionFail(t *testing.T) {
 	require.EqualError(t, err, "failed to connect")
 }
 
-func TestMust(t *testing.T) {
+func Test_Must(t *testing.T) {
 	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
 	require.NotNil(t, conn)
 
@@ -172,6 +172,16 @@ func TestMust(t *testing.T) {
 		}
 	}()
 	_ = Must(NewFromURL("", "invalid"))
+}
+
+func Test_URI(t *testing.T) {
+	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
+	require.NotNil(t, conn)
+	require.Equal(t, "localhost", conn.URI().Host)
+	require.Equal(t, 67333, conn.URI().Port)
+	require.Equal(t, "a", conn.URI().Vhost)
+	require.Equal(t, "user", conn.URI().Username)
+	require.Equal(t, "password", conn.URI().Password)
 }
 
 func Test_CloseCallsUnderlyingCloseMethod(t *testing.T) {
