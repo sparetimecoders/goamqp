@@ -1,18 +1,15 @@
 name: Check dependencies licenses
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - "*"
+    branches: [ main ]
 jobs:
   license-check:
     runs-on: ubuntu-latest
     name: License and Copyright Check
     steps:
       - uses: actions/checkout@v3
-      - name: license check
-        uses: yusufpapurcu/go-license-checker@v0.9
+      - uses: opzkit/go-license-check-action@v1
         with:
-          runVendor: "false"
+          go-version-file: 'go.mod'
