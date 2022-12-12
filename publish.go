@@ -38,6 +38,11 @@ type Publisher struct {
 	typeToRoutingKey routes
 }
 
+var (
+	// ErrNoRouteForMessageType when the published message cannot be routed.
+	ErrNoRouteForMessageType = fmt.Errorf("no routingkey configured for message of type")
+)
+
 // NewPublisher returns a publisher that can be used to send messages
 func NewPublisher(routes ...Route) (*Publisher, error) {
 	r := make(map[reflect.Type]string)
@@ -81,7 +86,7 @@ func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...
 	if key, ok := p.typeToRoutingKey[key]; ok {
 		return p.connection.publishMessage(ctx, msg, key, p.exchange, table)
 	}
-	return fmt.Errorf("no routingkey configured for message of type %s", t)
+	return fmt.Errorf("%w %s", ErrNoRouteForMessageType, t)
 }
 
 func (p *Publisher) setDefaultHeaders(serviceName string, headers ...Header) error {

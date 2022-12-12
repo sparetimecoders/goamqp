@@ -896,6 +896,7 @@ func Test_ServicePublisher_NoMatchingRoute(t *testing.T) {
 	require.Equal(t, 0, len(channel.BindingDeclarations))
 
 	err = p.PublishWithContext(context.Background(), &TestMessage{Msg: "test"})
+	require.True(t, errors.Is(err, ErrNoRouteForMessageType))
 	require.EqualError(t, err, "no routingkey configured for message of type *goamqp.TestMessage")
 }
 
