@@ -23,7 +23,6 @@
 package goamqp
 
 import (
-	"io/ioutil"
 	"os"
 	"reflect"
 	"testing"
@@ -32,7 +31,7 @@ import (
 )
 
 func TestStdoutLogger(t *testing.T) {
-	file, err := ioutil.TempFile("", "")
+	file, err := os.CreateTemp("", "")
 	require.NoError(t, err)
 	defer func() { _ = os.Remove(file.Name()) }()
 	logger := StdOutMessageLogger()
@@ -41,7 +40,7 @@ func TestStdoutLogger(t *testing.T) {
 	logger([]byte(`{"key":"value"}`), reflect.TypeOf(Connection{}), "key", false)
 	os.Stdout = stdout
 	file.Close()
-	all, err := ioutil.ReadFile(file.Name())
+	all, err := os.ReadFile(file.Name())
 	require.NoError(t, err)
 	require.Equal(t, "Received [goamqp.Connection] from routingkey: 'key' with content:\n{\n\t\"key\": \"value\"\n}\n", string(all))
 }
