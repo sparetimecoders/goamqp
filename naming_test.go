@@ -30,17 +30,11 @@ import (
 )
 
 func TestEventExchangeName(t *testing.T) {
-	assert.Equal(t, "events.topic.exchange", eventsExchangeName())
-}
-
-func TestExchangeName(t *testing.T) {
-	assert.Equal(t, "svc.direct.exchange", exchangeName("svc", "direct"))
-	assert.Equal(t, "svc.topic.exchange", exchangeName("svc", "topic"))
-	assert.Equal(t, "svc.headers.exchange", exchangeName("svc", "headers"))
+	assert.Equal(t, "events.topic.exchange", topicExchangeName(defaultEventExchangeName))
 }
 
 func TestServiceEventQueueName(t *testing.T) {
-	assert.Equal(t, "events.topic.exchange.queue.svc", serviceEventQueueName("svc"))
+	assert.Equal(t, "events.topic.exchange.queue.svc", serviceEventQueueName(topicExchangeName(defaultEventExchangeName), "svc"))
 }
 
 func TestRequestExchangeName(t *testing.T) {
@@ -61,5 +55,5 @@ func TestServiceResponseQueueName(t *testing.T) {
 
 func TestEventRandomQueueName(t *testing.T) {
 	uuid.SetRand(&badRand{})
-	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", serviceEventRandomQueueName("svc"))
+	assert.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", serviceEventRandomQueueName(topicExchangeName(defaultEventExchangeName), "svc"))
 }

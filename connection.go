@@ -185,13 +185,31 @@ func WithPrefetchLimit(limit int) Setup {
 // connection is closed.
 // For a durable queue, use the EventStreamConsumer function instead.
 func TransientEventStreamConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
+	return TransientStreamConsumer(defaultEventExchangeName, routingKey, handler, eventType)
+}
+
+// EventStreamConsumer sets up ap a durable, persistent event stream consumer.
+// For a transient queue, use the TransientEventStreamConsumer function instead.
+func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
+	return StreamConsumer(defaultEventExchangeName, routingKey, handler, eventType, opts...)
+}
+
+// EventStreamPublisher sets up an event stream publisher
+func EventStreamPublisher(publisher *Publisher) Setup {
+	return StreamPublisher(defaultEventExchangeName, publisher)
+}
+
+// TransientStreamConsumer sets up an event stream consumer that will clean up resources when the
+// connection is closed.
+// For a durable queue, use the StreamConsumer function instead.
+func TransientStreamConsumer(exchange, routingKey string, handler HandlerFunc, eventType any) Setup {
+	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
 		eventTyp, err := getEventType(eventType)
 		if err != nil {
 			return err
 		}
-		queueName := serviceEventRandomQueueName(c.serviceName)
-		exchangeName := eventsExchangeName()
+		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
 		if err := c.addHandler(queueName, routingKey, eventTyp, messageHandlerInvoker{
 			msgHandler: handler,
 			queueRoutingKey: queueRoutingKey{
@@ -213,9 +231,9 @@ func TransientEventStreamConsumer(routingKey string, handler HandlerFunc, eventT
 	}
 }
 
-// EventStreamConsumer sets up ap a durable, persistent event stream consumer.
-// For a transient queue, use the TransientEventStreamConsumer function instead.
-func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
+// StreamConsumer sets up ap a durable, persistent event stream consumer.
+func StreamConsumer(exchange, routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
+	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
 		eventTyp, err := getEventType(eventType)
 		if err != nil {
@@ -225,8 +243,8 @@ func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, 
 			routingKey:   routingKey,
 			handler:      handler,
 			eventType:    eventTyp,
-			queueName:    serviceEventQueueName(c.serviceName),
-			exchangeName: eventsExchangeName(),
+			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
+			exchangeName: exchangeName,
 			kind:         kindTopic,
 			headers:      amqp.Table{},
 		}
@@ -240,17 +258,18 @@ func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, 
 	}
 }
 
-// EventStreamPublisher sets up an event stream publisher
-func EventStreamPublisher(publisher *Publisher) Setup {
+// StreamPublisher sets up an event stream publisher
+func StreamPublisher(exchange string, publisher *Publisher) Setup {
+	name := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		if err := c.exchangeDeclare(c.channel, eventsExchangeName(), kindTopic); err != nil {
-			return errors.Wrapf(err, "failed to declare exchange %s", eventsExchangeName())
+		if err := c.exchangeDeclare(c.channel, name, kindTopic); err != nil {
+			return errors.Wrapf(err, "failed to declare exchange %s", name)
 		}
 		publisher.connection = c
 		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
 			return err
 		}
-		publisher.exchange = eventsExchangeName()
+		publisher.exchange = name
 		return nil
 	}
 }
