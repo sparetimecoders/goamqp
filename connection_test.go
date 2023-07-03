@@ -726,7 +726,7 @@ func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("")))
-	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.EventStreamConsumer.func1> failed, queuebinding setup function <github.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
+	require.EqualError(t, err, "setup function <github.com/sparetimecoders/goamqp.StreamConsumer.func1> failed, queuebinding setup function <github.com/sparetimecoders/goamqp.AddQueueNameSuffix.func1> failed, empty queue suffix not allowed")
 }
 
 func Test_ServiceRequestConsumer_Ok(t *testing.T) {

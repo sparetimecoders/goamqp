@@ -28,20 +28,18 @@ import (
 	"github.com/google/uuid"
 )
 
-func eventsExchangeName() string {
-	return exchangeName("events", "topic")
+const defaultEventExchangeName = "events"
+
+func topicExchangeName(svcName string) string {
+	return fmt.Sprintf("%s.%s.exchange", svcName, kindTopic)
 }
 
-func exchangeName(svcName, kind string) string {
-	return fmt.Sprintf("%s.%s.exchange", svcName, kind)
+func serviceEventQueueName(exchangeName, service string) string {
+	return fmt.Sprintf("%s.queue.%s", exchangeName, service)
 }
 
-func serviceEventQueueName(service string) string {
-	return fmt.Sprintf("%s.queue.%s", eventsExchangeName(), service)
-}
-
-func serviceEventRandomQueueName(service string) string {
-	return fmt.Sprintf("%s.queue.%s-%s", eventsExchangeName(), service, randomString())
+func serviceEventRandomQueueName(exchangeName, service string) string {
+	return fmt.Sprintf("%s.queue.%s-%s", exchangeName, service, randomString())
 }
 
 func serviceRequestExchangeName(svcName string) string {
