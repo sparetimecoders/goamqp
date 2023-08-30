@@ -457,6 +457,132 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	require.Equal(suite.T(), 1, len(queuesAfterClose))
 	require.Equal(suite.T(), "events.topic.exchange.queue.client1", queuesAfterClose[0].Name)
 }
+func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
+	closer := make(chan bool, 2)
+	wildcardRoutingKey := "test.#"
+	wildcardStarRoutingKey := "1.*.test.*"
+	exactMatchRoutingKey := "testing"
+	clientQuery := "test"
+	publish, err := NewPublisher(
+		Route{
+			Type: Incoming{},
+			Key:  "test.1",
+		},
+		Route{
+			Type: Test{},
+			Key:  "1.2.test.2",
+		},
+		Route{
+			Type: IncomingResponse{},
+			Key:  exactMatchRoutingKey,
+		})
+	require.NoError(suite.T(), err)
+	server := createConnection(suite, serverServiceName,
+		EventStreamPublisher(publish))
+	defer server.Close()
+
+	var wildcardStarReceiver []any
+	var wildcardReceiver []any
+	var exactMatchReceiver []any
+	client1 := createConnection(suite, "client1",
+		EventStreamConsumer(wildcardRoutingKey, func(msg any, headers Headers) (response any, err error) {
+			wildcardReceiver = append(wildcardReceiver, msg)
+			closer <- true
+			return nil, nil
+		}, Incoming{}),
+		EventStreamConsumer(wildcardStarRoutingKey, func(msg any, headers Headers) (response any, err error) {
+			wildcardStarReceiver = append(wildcardStarReceiver, msg)
+			closer <- true
+			return nil, nil
+		}, Test{}),
+		EventStreamConsumer("testing", func(msg any, headers Headers) (response any, err error) {
+			exactMatchReceiver = append(exactMatchReceiver, msg)
+			closer <- true
+			return nil, nil
+		}, IncomingResponse{}))
+	defer client1.Close()
+
+	err = publish.PublishWithContext(context.Background(), &Test{Test: clientQuery})
+	require.NoError(suite.T(), err)
+	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	require.NoError(suite.T(), err)
+	err = publish.PublishWithContext(context.Background(), &IncomingResponse{Value: clientQuery})
+	require.NoError(suite.T(), err)
+
+	go forceClose(closer, 3)
+	<-closer
+	<-closer
+	<-closer
+	require.Equal(suite.T(), &Incoming{Query: clientQuery}, wildcardReceiver[0])
+	require.Equal(suite.T(), &Test{Test: clientQuery}, wildcardStarReceiver[0])
+	require.Equal(suite.T(), &IncomingResponse{Value: clientQuery}, exactMatchReceiver[0])
+
+	// Verify exchanges
+	exchanges, err := suite.admin.GetExchanges(true)
+	require.NoError(suite.T(), err)
+	require.Equal(suite.T(), []Exchange{{
+		AutoDelete: false,
+		Durable:    true,
+		Internal:   false,
+		Name:       "events.topic.exchange",
+		Type:       "topic",
+		Vhost:      suite.admin.vhost,
+	}}, exchanges)
+
+	// Verify queues and bindings
+	queuesBeforeClose, err := suite.admin.GetQueues()
+	require.Equal(suite.T(), 1, len(queuesBeforeClose))
+	q := queuesBeforeClose[0]
+	bindings, err := suite.admin.GetBindings(q.Name, true)
+	require.NoError(suite.T(), err)
+	require.Equal(suite.T(), Queue{
+		Arguments: QueueArguments{
+			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+		},
+		AutoDelete:           false,
+		Durable:              true,
+		Exclusive:            false,
+		ExclusiveConsumerTag: nil,
+		Name:                 "events.topic.exchange.queue.client1",
+		Vhost:                suite.admin.vhost,
+	}, q)
+	require.ElementsMatch(suite.T(), bindings, []Binding{
+		{
+			Source:          "events.topic.exchange",
+			Vhost:           suite.admin.vhost,
+			Destination:     q.Name,
+			DestinationType: "queue",
+			RoutingKey:      wildcardStarRoutingKey,
+			Arguments:       struct{}{},
+		},
+		{
+			Source:          "events.topic.exchange",
+			Vhost:           suite.admin.vhost,
+			Destination:     q.Name,
+			DestinationType: "queue",
+			RoutingKey:      wildcardRoutingKey,
+			Arguments:       struct{}{},
+		},
+		{
+			Source:          "events.topic.exchange",
+			Vhost:           suite.admin.vhost,
+			Destination:     q.Name,
+			DestinationType: "queue",
+			RoutingKey:      exactMatchRoutingKey,
+			Arguments:       struct{}{},
+		},
+	})
+
+	require.NoError(suite.T(), err)
+
+	client1.Close()
+
+	// Transient queues removed
+	queuesAfterClose, err := suite.admin.GetQueues()
+	require.NoError(suite.T(), err)
+	require.Equal(suite.T(), 1, len(queuesAfterClose))
+	require.Equal(suite.T(), "events.topic.exchange.queue.client1", queuesAfterClose[0].Name)
+}
 
 func createConnection(suite *IntegrationTestSuite, serviceName string, opts ...Setup) *Connection {
 	conn, err := NewFromURL(serviceName, fmt.Sprintf("%s/%s", amqpURL, suite.admin.vhost))
@@ -473,6 +599,10 @@ func forceClose(closer chan bool, seconds int64) {
 
 type Incoming struct {
 	Query string
+}
+
+type Test struct {
+	Test string
 }
 
 type IncomingResponse struct {

@@ -35,6 +35,8 @@ import (
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
+
+	handlers2 "github.com/sparetimecoders/goamqp/internal/handlers"
 )
 
 func Test_AmqpVersion(t *testing.T) {
@@ -108,10 +110,10 @@ func Test_Start_SetupFails(t *testing.T) {
 		},
 	}
 	conn := &Connection{
-		serviceName: "test",
-		connection:  mockAmqpConnection,
-		channel:     mockChannel,
-		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
+		serviceName:   "test",
+		connection:    mockAmqpConnection,
+		channel:       mockChannel,
+		queueHandlers: &handlers2.QueueHandlers[messageHandlerInvoker]{},
 	}
 	err := conn.Start(context.Background(),
 		EventStreamConsumer("test", func(i any, headers Headers) (any, error) {
@@ -459,8 +461,8 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	}
 	channel := MockAmqpChannel{Published: make(chan Publish, 1)}
 
-	handlers := make(map[string]messageHandlerInvoker)
-	msgInvoker := messageHandlerInvoker{
+	handlers := &handlers2.QueueHandlers[messageHandlerInvoker]{}
+	msgInvoker := &messageHandlerInvoker{
 		eventType: reflect.TypeOf(Message{}),
 		msgHandler: func(i any, headers Headers) (any, error) {
 			if i.(*Message).Ok {
@@ -469,8 +471,8 @@ func Test_DivertToMessageHandler(t *testing.T) {
 			return nil, errors.New("failed")
 		},
 	}
-	handlers["key1"] = msgInvoker
-	handlers["key2"] = msgInvoker
+	require.NoError(t, handlers.Add("q", "key1", msgInvoker))
+	require.NoError(t, handlers.Add("q", "key2", msgInvoker))
 
 	queueDeliveries := make(chan amqp.Delivery, 6)
 
@@ -486,7 +488,7 @@ func Test_DivertToMessageHandler(t *testing.T) {
 		messageLogger: noOpMessageLogger(),
 		errorLogF:     noOpLogger,
 	}
-	c.divertToMessageHandlers(queueDeliveries, handlers)
+	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0].Handlers)
 
 	require.Equal(t, 1, len(acker.Rejects))
 	require.Equal(t, 1, len(acker.Nacks))
@@ -549,8 +551,7 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 			return nil, nil
 		}
 		return nil, errors.New("failed")
-	}, reflect.TypeOf(Message{}),
-		"routingkey")
+	}, reflect.TypeOf(Message{}))
 	return acker
 }
 
@@ -813,14 +814,9 @@ func Test_RequestResponseHandler(t *testing.T) {
 	require.Equal(t, 1, len(channel.BindingDeclarations))
 	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
 
-	require.Equal(t, 1, len(conn.handlers))
+	require.Equal(t, 1, len(conn.queueHandlers.Queues()))
 
-	invoker := conn.handlers[queueRoutingKey{
-		Queue:      "svc.direct.exchange.request.queue",
-		RoutingKey: "key",
-	}]
-	require.Equal(t, "svc.direct.exchange.request.queue", invoker.Queue)
-	require.Equal(t, "key", invoker.RoutingKey)
+	invoker, _ := conn.queueHandlers.Handlers("svc.direct.exchange.request.queue").Get("key")
 	require.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
 	require.Equal(t, "github.com/sparetimecoders/goamqp.responseWrapper.func1", runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name())
 }
@@ -932,33 +928,22 @@ func Test_TransientEventStreamConsumer_Ok(t *testing.T) {
 	require.Equal(t, 1, len(channel.QueueDeclarations))
 	require.Equal(t, QueueDeclaration{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
 
-	require.Equal(t, 1, len(conn.handlers))
-	key := queueRoutingKey{
-		Queue:      "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f",
-		RoutingKey: "key",
-	}
-	invoker := conn.handlers[key]
+	require.Equal(t, 1, len(conn.queueHandlers.Queues()))
+	invoker, _ := conn.queueHandlers.Handlers("events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f").Get("key")
 	require.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
-	require.Equal(t, "key", invoker.RoutingKey)
-	require.Equal(t, "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", invoker.Queue)
-	require.Equal(t, key, invoker.queueRoutingKey)
 }
 
 func Test_TransientEventStreamConsumer_HandlerForRoutingKeyAlreadyExists(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	key := queueRoutingKey{
-		Queue:      "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f",
-		RoutingKey: "key",
-	}
-	conn.handlers[key] = messageHandlerInvoker{}
+	require.NoError(t, conn.queueHandlers.Add("events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", "root.key", &messageHandlerInvoker{}))
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := TransientEventStreamConsumer("root.#", func(i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
-	require.EqualError(t, err, "routingkey key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f already assigned to handler for type %!s(<nil>), cannot assign goamqp.Message, consider using AddQueueNameSuffix")
+	require.EqualError(t, err, "routingkey root.# overlaps root.key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f, consider using AddQueueNameSuffix")
 }
 
 func Test_TransientEventStreamConsumer_ExchangeDeclareFails(t *testing.T) {

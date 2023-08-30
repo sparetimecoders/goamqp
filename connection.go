@@ -35,6 +35,8 @@ import (
 
 	"github.com/pkg/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/sparetimecoders/goamqp/internal/handlers"
 )
 
 // Setup is a setup function that takes a Connection and use it to set up AMQP
@@ -54,12 +56,12 @@ type Route struct {
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
-	started     bool
-	serviceName string
-	amqpUri     amqp.URI
-	connection  amqpConnection
-	channel     AmqpChannel
-	handlers    map[queueRoutingKey]messageHandlerInvoker
+	started       bool
+	serviceName   string
+	amqpUri       amqp.URI
+	connection    amqpConnection
+	channel       AmqpChannel
+	queueHandlers *handlers.QueueHandlers[messageHandlerInvoker]
 	// messageLogger defaults to noOpMessageLogger, can be overridden with UseMessageLogger
 	messageLogger MessageLogger
 	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
@@ -210,13 +212,9 @@ func TransientStreamConsumer(exchange, routingKey string, handler HandlerFunc, e
 			return err
 		}
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
-		if err := c.addHandler(queueName, routingKey, eventTyp, messageHandlerInvoker{
+		if err := c.addHandler(queueName, routingKey, eventTyp, &messageHandlerInvoker{
 			msgHandler: handler,
-			queueRoutingKey: queueRoutingKey{
-				Queue:      queueName,
-				RoutingKey: routingKey,
-			},
-			eventType: eventTyp,
+			eventType:  eventTyp,
 		}); err != nil {
 			return err
 		}
@@ -577,19 +575,11 @@ func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind
 	)
 }
 
-func (c *Connection) addHandler(queueName, routingKey string, eventType eventType, mHI messageHandlerInvoker) error {
-	uniqueKey := queueRoutingKey{Queue: queueName, RoutingKey: routingKey}
-
-	if existing, exist := c.handlers[uniqueKey]; exist {
-		return fmt.Errorf("routingkey %s for queue %s already assigned to handler for type %s, cannot assign %s, consider using AddQueueNameSuffix", routingKey, queueName, existing.eventType, eventType)
-	}
-	c.handlers[uniqueKey] = mHI
-
-	return nil
+func (c *Connection) addHandler(queueName, routingKey string, eventType eventType, mHI *messageHandlerInvoker) error {
+	return c.queueHandlers.Add(queueName, routingKey, mHI)
 }
 
-func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType, routingKey string) {
-	c.messageLogger(d.Body, eventType, routingKey, false)
+func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType) {
 	message, err := c.parseMessage(d.Body, eventType)
 	if err != nil {
 		c.errorLogF("failed to parse message %s", err)
@@ -635,10 +625,11 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 	)
 }
 
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers map[string]messageHandlerInvoker) {
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers *handlers.Handlers[messageHandlerInvoker]) {
 	for d := range deliveries {
-		if h, ok := handlers[d.RoutingKey]; ok {
-			c.handleMessage(d, h.msgHandler, h.eventType, d.RoutingKey)
+		if h, ok := handlers.Get(d.RoutingKey); ok {
+			c.messageLogger(d.Body, h.eventType, d.RoutingKey, false)
+			c.handleMessage(d, h.msgHandler, h.eventType)
 		} else {
 			// Unhandled message, drop it
 			_ = d.Reject(false)
@@ -647,13 +638,9 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, ha
 }
 
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
-	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.eventType, messageHandlerInvoker{
+	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.eventType, &messageHandlerInvoker{
 		msgHandler: cfg.handler,
-		queueRoutingKey: queueRoutingKey{
-			Queue:      cfg.queueName,
-			RoutingKey: cfg.routingKey,
-		},
-		eventType: cfg.eventType,
+		eventType:  cfg.eventType,
 	}); err != nil {
 		return err
 	}
@@ -683,29 +670,19 @@ var queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seco
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
-		serviceName: serviceName,
-		amqpUri:     uri,
-		handlers:    make(map[queueRoutingKey]messageHandlerInvoker),
+		serviceName:   serviceName,
+		amqpUri:       uri,
+		queueHandlers: &handlers.QueueHandlers[messageHandlerInvoker]{},
 	}
 }
 
 func (c *Connection) setup() error {
-	queues := make(map[string][]messageHandlerInvoker)
-
-	for qr, h := range c.handlers {
-		queues[qr.Queue] = append(queues[qr.Queue], h)
-	}
-
-	for q, h := range queues {
-		queueHandlers := make(map[string]messageHandlerInvoker)
-		for _, kh := range h {
-			queueHandlers[kh.RoutingKey] = kh
-		}
-		consumer, err := consume(c.channel, q)
+	for _, queue := range c.queueHandlers.Queues() {
+		consumer, err := consume(c.channel, queue.Name)
 		if err != nil {
-			return fmt.Errorf("failed to create consumer for queue %s. %v", q, err)
+			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)
 		}
-		go c.divertToMessageHandlers(consumer, queueHandlers)
+		go c.divertToMessageHandlers(consumer, queue.Handlers)
 	}
 	return nil
 }
@@ -721,15 +698,9 @@ type eventType reflect.Type
 
 type routes map[reflect.Type]string
 
-type queueRoutingKey struct {
-	Queue      string
-	RoutingKey string
-}
-
 type messageHandlerInvoker struct {
 	msgHandler HandlerFunc
-	queueRoutingKey
-	eventType eventType
+	eventType  eventType
 }
 
 // getSetupFuncName returns the name of the Setup function
