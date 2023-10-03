@@ -35,9 +35,7 @@ func ExampleEventStream() {
 	ctx := context.Background()
 
 	orderServiceConnection := Must(NewFromURL("order-service", amqpURL))
-	orderPublisher := Must(NewPublisher(
-		Route{Type: OrderCreated{}, Key: "Order.Created"},
-		Route{Type: OrderUpdated{}, Key: "Order.Updated"}))
+	orderPublisher := NewPublisher()
 	err := orderServiceConnection.Start(ctx,
 		EventStreamPublisher(orderPublisher),
 	)

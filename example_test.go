@@ -31,10 +31,11 @@ func Example() {
 	ctx := context.Background()
 
 	amqpURL := "amqp://user:password@localhost:5672/"
-	publisher := Must(NewPublisher(Route{Type: IncomingMessage{}, Key: "key"}))
+	publisher := NewPublisher()
 
 	connection := Must(NewFromURL("service", amqpURL))
 	err := connection.Start(ctx,
+		WithTypeMapping("key", IncomingMessage{}),
 		EventStreamConsumer("key", process, IncomingMessage{}),
 		EventStreamPublisher(publisher),
 	)

@@ -479,3 +479,21 @@ func Test_PublishNotify(t *testing.T) {
 	require.Equal(t, &notifier, channel.Confirms)
 	require.Equal(t, true, channel.ConfirmCalled)
 }
+
+func Test_WithTypeMapping_KeyAlreadyExist(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	err := WithTypeMapping("key", TestMessage{})(conn)
+	assert.NoError(t, err)
+	err = WithTypeMapping("key", TestMessage2{})(conn)
+	assert.EqualError(t, err, "mapping for routing key 'key' already registered to type 'goamqp.TestMessage'")
+}
+
+func Test_WithTypeMapping_TypeAlreadyExist(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+	err := WithTypeMapping("key", TestMessage{})(conn)
+	assert.NoError(t, err)
+	err = WithTypeMapping("other", TestMessage{})(conn)
+	assert.EqualError(t, err, "mapping for type 'goamqp.TestMessage' already registered to routing key 'key'")
+}

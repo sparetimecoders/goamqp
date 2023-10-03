@@ -44,12 +44,6 @@ import (
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
 type HandlerFunc func(msg any, headers Headers) (response any, err error)
 
-// Route defines the routing key to be used for a message type
-type Route struct {
-	Type any
-	Key  string
-}
-
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
 	started       bool
@@ -62,6 +56,8 @@ type Connection struct {
 	messageLogger MessageLogger
 	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
 	errorLogF errorLogf
+	typeToKey map[reflect.Type]string
+	keyToType map[string]reflect.Type
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
@@ -172,6 +168,27 @@ func (c *Connection) Close() error {
 		return nil
 	}
 	return c.connection.Close()
+}
+
+func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
+	return func(msg any, headers Headers) (response any, err error) {
+		routingKey := headers["routing-key"].(string)
+		typ, exists := c.keyToType[routingKey]
+		if !exists {
+			return nil, fmt.Errorf("no mapped type found for routing key '%s'", routingKey)
+		}
+		body := []byte(*msg.(*json.RawMessage))
+		message, err := c.parseMessage(body, typ)
+		if err != nil {
+			return nil, err
+		} else {
+			if resp, err := handler(message, headers); err == nil {
+				return resp, nil
+			} else {
+				return nil, err
+			}
+		}
+	}
 }
 
 // AmqpChannel wraps the amqp.Channel to allow for mocking
@@ -428,6 +445,8 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 		serviceName:   serviceName,
 		amqpUri:       uri,
 		queueHandlers: &handlers.QueueHandlers[messageHandlerInvoker]{},
+		keyToType:     make(map[string]reflect.Type),
+		typeToKey:     make(map[reflect.Type]string),
 	}
 }
 
@@ -450,8 +469,6 @@ func getEventType(eventType any) (eventType, error) {
 }
 
 type eventType reflect.Type
-
-type routes map[reflect.Type]string
 
 type messageHandlerInvoker struct {
 	msgHandler HandlerFunc

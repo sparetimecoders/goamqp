@@ -24,6 +24,7 @@ package goamqp
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/pkg/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -32,6 +33,22 @@ import (
 // Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
+
+// WithTypeMapping adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
+func WithTypeMapping(routingKey string, msgType any) Setup {
+	return func(conn *Connection) error {
+		typ := reflect.TypeOf(msgType)
+		if t, exists := conn.keyToType[routingKey]; exists {
+			return fmt.Errorf("mapping for routing key '%s' already registered to type '%s'", routingKey, t)
+		}
+		if key, exists := conn.typeToKey[typ]; exists {
+			return fmt.Errorf("mapping for type '%s' already registered to routing key '%s'", typ, key)
+		}
+		conn.keyToType[routingKey] = typ
+		conn.typeToKey[typ] = routingKey
+		return nil
+	}
+}
 
 // CloseListener receives a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {

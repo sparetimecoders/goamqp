@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	handlers2 "github.com/sparetimecoders/goamqp/internal/handlers"
@@ -508,9 +509,8 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 }
 
 func Test_Publisher_ReservedHeader(t *testing.T) {
-	p, err := NewPublisher(Route{TestMessage{}, "key"}, Route{TestMessage2{}, "key2"})
-	require.NoError(t, err)
-	err = p.PublishWithContext(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})
+	p := NewPublisher()
+	err := p.PublishWithContext(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})
 	require.EqualError(t, err, "reserved key service used, please change to use another one")
 }
 
@@ -543,4 +543,119 @@ func (m *mockPublisher) publish(ctx context.Context, targetService, routingKey s
 
 func (m *mockPublisher) checkPublished(t *testing.T, i any) {
 	require.EqualValues(t, m.published, i)
+}
+
+func TestConnection_TypeMappingHandler(t *testing.T) {
+	type fields struct {
+		typeToKey map[reflect.Type]string
+		keyToType map[string]reflect.Type
+	}
+	type args struct {
+		handler func(t *testing.T) HandlerFunc
+		msg     json.RawMessage
+		key     string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    any
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name:   "no mapped type",
+			fields: fields{},
+			args: args{
+				msg: []byte(`{"a":true}`),
+				key: "unknown",
+				handler: func(t *testing.T) HandlerFunc {
+					return func(msg any, headers Headers) (response any, err error) {
+						return nil, nil
+					}
+				},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.EqualError(t, err, "no mapped type found for routing key 'unknown'")
+			},
+		},
+		{
+			name: "parse error",
+			fields: fields{
+				keyToType: map[string]reflect.Type{
+					"known": reflect.TypeOf(TestMessage{}),
+				},
+			},
+			args: args{
+				msg: []byte(`{"a:}`),
+				key: "known",
+				handler: func(t *testing.T) HandlerFunc {
+					return func(msg any, headers Headers) (response any, err error) {
+						return nil, nil
+					}
+				},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.EqualError(t, err, "unexpected end of JSON input")
+			},
+		},
+		{
+			name: "handler error",
+			fields: fields{
+				keyToType: map[string]reflect.Type{
+					"known": reflect.TypeOf(TestMessage{}),
+				},
+			},
+			args: args{
+				msg: []byte(`{"a":true}`),
+				key: "known",
+				handler: func(t *testing.T) HandlerFunc {
+					return func(msg any, headers Headers) (response any, err error) {
+						assert.IsType(t, &TestMessage{}, msg)
+						return nil, fmt.Errorf("handler-error")
+					}
+				},
+			},
+			want: nil,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.EqualError(t, err, "handler-error")
+			},
+		},
+		{
+			name: "success",
+			fields: fields{
+				keyToType: map[string]reflect.Type{
+					"known": reflect.TypeOf(TestMessage{}),
+				},
+			},
+			args: args{
+				msg: []byte(`{"a":true}`),
+				key: "known",
+				handler: func(t *testing.T) HandlerFunc {
+					return func(msg any, headers Headers) (response any, err error) {
+						assert.IsType(t, &TestMessage{}, msg)
+						return "OK", nil
+					}
+				},
+			},
+			want:    "OK",
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Connection{
+				typeToKey: tt.fields.typeToKey,
+				keyToType: tt.fields.keyToType,
+			}
+
+			handler := c.TypeMappingHandler(tt.args.handler(t))
+			res, err := handler(&tt.args.msg, headers(make(amqp.Table), tt.args.key))
+			if !tt.wantErr(t, err) {
+				return
+			}
+			assert.Equalf(t, tt.want, res, "TypeMappingHandler()")
+		})
+	}
 }

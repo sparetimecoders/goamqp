@@ -32,10 +32,9 @@ import (
 
 // Publisher is used to send messages
 type Publisher struct {
-	connection       *Connection
-	exchange         string
-	defaultHeaders   []Header
-	typeToRoutingKey routes
+	connection     *Connection
+	exchange       string
+	defaultHeaders []Header
 }
 
 var (
@@ -44,20 +43,8 @@ var (
 )
 
 // NewPublisher returns a publisher that can be used to send messages
-func NewPublisher(routes ...Route) (*Publisher, error) {
-	r := make(map[reflect.Type]string)
-
-	for _, route := range routes {
-		typ := reflect.TypeOf(route.Type)
-		if key, exists := r[typ]; exists {
-			return nil, fmt.Errorf("type %s already assigned to routingkey %s, cannot assign routingkey %s", typ, key, route.Key)
-		}
-		r[typ] = route.Key
-	}
-
-	return &Publisher{
-		typeToRoutingKey: r,
-	}, nil
+func NewPublisher() *Publisher {
+	return &Publisher{}
 }
 
 // Publish publishes a message to a given exchange
@@ -83,7 +70,7 @@ func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...
 	if t.Kind() == reflect.Ptr {
 		key = t.Elem()
 	}
-	if key, ok := p.typeToRoutingKey[key]; ok {
+	if key, ok := p.connection.typeToKey[key]; ok {
 		return p.connection.publishMessage(ctx, msg, key, p.exchange, table)
 	}
 	return fmt.Errorf("%w %s", ErrNoRouteForMessageType, t)
