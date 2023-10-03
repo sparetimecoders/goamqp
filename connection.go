@@ -340,7 +340,7 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 		c.errorLogF("failed to parse message %s", err)
 		_ = d.Reject(false)
 	} else {
-		if _, err := handler(message, headers(d.Headers)); err == nil {
+		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
 			_ = d.Ack(false)
 		} else {
 			c.errorLogF("failed to process message %s", err)
