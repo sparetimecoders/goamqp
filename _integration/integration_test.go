@@ -129,14 +129,12 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 			func(msg any, headers Headers) (any, error) {
 				serverReceived = msg.(*Incoming)
 				return IncomingResponse{Value: serverReceived.Query}, nil
-			}, Incoming{}))
+			}, Incoming{}),
+		WithTypeMapping(routingKey, Incoming{}),
+	)
 	defer server.Close()
 
-	publish, err := NewPublisher(Route{
-		Type: Incoming{},
-		Key:  routingKey,
-	})
-	require.NoError(suite.T(), err)
+	publish := NewPublisher()
 
 	var clientReceived *IncomingResponse
 	client := createConnection(suite, "client",
@@ -148,7 +146,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 		}, IncomingResponse{}))
 	defer client.Close()
 
-	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err := publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
 	<-closer
@@ -234,32 +232,31 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	closer := make(chan bool, 2)
 	routingKey := "key1"
 	clientQuery := "test"
-	publish, err := NewPublisher(
-		Route{
-			Type: Incoming{},
-			Key:  routingKey,
-		})
-	require.NoError(suite.T(), err)
+	publish := NewPublisher()
 	server := createConnection(suite, serverServiceName,
 		EventStreamPublisher(publish))
 	defer server.Close()
 
 	var client1Received *Incoming
 	var client2Received *Incoming
-	client1 := createConnection(suite, "client1", EventStreamConsumer(routingKey, func(msg any, headers Headers) (response any, err error) {
-		client1Received = msg.(*Incoming)
-		closer <- true
-		return nil, nil
-	}, Incoming{}))
+	client1 := createConnection(suite, "client1",
+		EventStreamConsumer(routingKey, func(msg any, headers Headers) (response any, err error) {
+			client1Received = msg.(*Incoming)
+			closer <- true
+			return nil, nil
+		}, Incoming{}),
+	)
 	defer client1.Close()
-	client2 := createConnection(suite, "client2", EventStreamConsumer(routingKey, func(msg any, headers Headers) (response any, err error) {
-		client2Received = msg.(*Incoming)
-		closer <- true
-		return nil, nil
-	}, Incoming{}))
+	client2 := createConnection(suite, "client2",
+		EventStreamConsumer(routingKey, func(msg any, headers Headers) (response any, err error) {
+			client2Received = msg.(*Incoming)
+			closer <- true
+			return nil, nil
+		}, Incoming{}),
+	)
 	defer client2.Close()
 
-	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err := publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
 	go forceClose(closer, 3)
@@ -342,18 +339,12 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	routingKey1 := "key1"
 	routingKey2 := "key2"
 	clientQuery := "test"
-	publish, err := NewPublisher(
-		Route{
-			Type: Incoming{},
-			Key:  routingKey1,
-		},
-		Route{
-			Type: IncomingResponse{},
-			Key:  routingKey2,
-		})
-	require.NoError(suite.T(), err)
+	publish := NewPublisher()
 	server := createConnection(suite, serverServiceName,
-		EventStreamPublisher(publish))
+		EventStreamPublisher(publish),
+		WithTypeMapping(routingKey1, Incoming{}),
+		WithTypeMapping(routingKey2, IncomingResponse{}),
+	)
 	defer server.Close()
 
 	var received []any
@@ -367,10 +358,11 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 			received = append(received, msg)
 			closer <- true
 			return nil, nil
-		}, IncomingResponse{}))
+		}, IncomingResponse{}),
+	)
 	defer client1.Close()
 
-	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err := publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 	err = publish.PublishWithContext(context.Background(), &IncomingResponse{Value: clientQuery})
 	require.NoError(suite.T(), err)
@@ -463,22 +455,13 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	wildcardStarRoutingKey := "1.*.test.*"
 	exactMatchRoutingKey := "testing"
 	clientQuery := "test"
-	publish, err := NewPublisher(
-		Route{
-			Type: Incoming{},
-			Key:  "test.1",
-		},
-		Route{
-			Type: Test{},
-			Key:  "1.2.test.2",
-		},
-		Route{
-			Type: IncomingResponse{},
-			Key:  exactMatchRoutingKey,
-		})
-	require.NoError(suite.T(), err)
+	publish := NewPublisher()
 	server := createConnection(suite, serverServiceName,
-		EventStreamPublisher(publish))
+		EventStreamPublisher(publish),
+		WithTypeMapping("test.1", Incoming{}),
+		WithTypeMapping("1.2.test.2", Test{}),
+		WithTypeMapping(exactMatchRoutingKey, IncomingResponse{}),
+	)
 	defer server.Close()
 
 	var wildcardStarReceiver []any
@@ -502,7 +485,7 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 		}, IncomingResponse{}))
 	defer client1.Close()
 
-	err = publish.PublishWithContext(context.Background(), &Test{Test: clientQuery})
+	err := publish.PublishWithContext(context.Background(), &Test{Test: clientQuery})
 	require.NoError(suite.T(), err)
 	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)

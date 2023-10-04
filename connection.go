@@ -39,20 +39,10 @@ import (
 	"github.com/sparetimecoders/goamqp/internal/handlers"
 )
 
-// Setup is a setup function that takes a Connection and use it to set up AMQP
-// An example is to create exchanges and queues
-type Setup func(conn *Connection) error
-
 // HandlerFunc is used to process an incoming message
 // If processing fails, an error should be returned and the message will be re-queued
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
 type HandlerFunc func(msg any, headers Headers) (response any, err error)
-
-// Route defines the routing key to be used for a message type
-type Route struct {
-	Type any
-	Key  string
-}
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
@@ -66,6 +56,8 @@ type Connection struct {
 	messageLogger MessageLogger
 	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
 	errorLogF errorLogf
+	typeToKey map[reflect.Type]string
+	keyToType map[string]reflect.Type
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
@@ -129,250 +121,9 @@ func Must[T any](t *T, err error) *T {
 	return t
 }
 
-// CloseListener receives a callback when the AMQP Channel gets closed
-func CloseListener(e chan error) Setup {
-	return func(c *Connection) error {
-		temp := make(chan *amqp.Error)
-		go func() {
-			for {
-				if ev := <-temp; ev != nil {
-					e <- errors.New(ev.Error())
-				}
-			}
-		}()
-		c.channel.NotifyClose(temp)
-		return nil
-	}
-}
-
-// UseLogger allows an errorLogf to be used to log errors during processing of messages
-func UseLogger(logger errorLogf) Setup {
-	return func(c *Connection) error {
-		if logger == nil {
-			return ErrNilLogger
-		}
-		c.errorLogF = logger
-		return nil
-	}
-}
-
-// UseMessageLogger allows a MessageLogger to be used when log in/outgoing messages
-func UseMessageLogger(logger MessageLogger) Setup {
-	return func(c *Connection) error {
-		if logger == nil {
-			return ErrNilLogger
-		}
-		c.messageLogger = logger
-		return nil
-	}
-}
-
-// WithPrefetchLimit configures the number of messages to prefetch from the server.
-// To get round-robin behavior between consumers consuming from the same queue on
-// different connections, set the prefetch count to 1, and the next available
-// message on the server will be delivered to the next available consumer.
-// If your consumer work time is reasonably consistent and not much greater
-// than two times your network round trip time, you will see significant
-// throughput improvements starting with a prefetch count of 2 or slightly
-// greater, as described by benchmarks on RabbitMQ.
-//
-// http://www.rabbitmq.com/blog/2012/04/25/rabbitmq-performance-measurements-part-2/
-func WithPrefetchLimit(limit int) Setup {
-	return func(conn *Connection) error {
-		return conn.channel.Qos(limit, 0, true)
-	}
-}
-
-// TransientEventStreamConsumer sets up an event stream consumer that will clean up resources when the
-// connection is closed.
-// For a durable queue, use the EventStreamConsumer function instead.
-func TransientEventStreamConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
-	return TransientStreamConsumer(defaultEventExchangeName, routingKey, handler, eventType)
-}
-
-// EventStreamConsumer sets up ap a durable, persistent event stream consumer.
-// For a transient queue, use the TransientEventStreamConsumer function instead.
-func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
-	return StreamConsumer(defaultEventExchangeName, routingKey, handler, eventType, opts...)
-}
-
-// EventStreamPublisher sets up an event stream publisher
-func EventStreamPublisher(publisher *Publisher) Setup {
-	return StreamPublisher(defaultEventExchangeName, publisher)
-}
-
-// TransientStreamConsumer sets up an event stream consumer that will clean up resources when the
-// connection is closed.
-// For a durable queue, use the StreamConsumer function instead.
-func TransientStreamConsumer(exchange, routingKey string, handler HandlerFunc, eventType any) Setup {
-	exchangeName := topicExchangeName(exchange)
-	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
-		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
-		if err := c.addHandler(queueName, routingKey, eventTyp, &messageHandlerInvoker{
-			msgHandler: handler,
-			eventType:  eventTyp,
-		}); err != nil {
-			return err
-		}
-
-		if err := c.exchangeDeclare(c.channel, exchangeName, kindTopic); err != nil {
-			return err
-		}
-		if err := transientQueueDeclare(c.channel, queueName); err != nil {
-			return err
-		}
-		return c.channel.QueueBind(queueName, routingKey, exchangeName, false, amqp.Table{})
-	}
-}
-
-// StreamConsumer sets up ap a durable, persistent event stream consumer.
-func StreamConsumer(exchange, routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
-	exchangeName := topicExchangeName(exchange)
-	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
-		config := &QueueBindingConfig{
-			routingKey:   routingKey,
-			handler:      handler,
-			eventType:    eventTyp,
-			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
-			exchangeName: exchangeName,
-			kind:         kindTopic,
-			headers:      amqp.Table{},
-		}
-		for _, f := range opts {
-			if err := f(config); err != nil {
-				return fmt.Errorf("queuebinding setup function <%s> failed, %v", getQueueBindingConfigSetupFuncName(f), err)
-			}
-		}
-
-		return c.messageHandlerBindQueueToExchange(config)
-	}
-}
-
-// StreamPublisher sets up an event stream publisher
-func StreamPublisher(exchange string, publisher *Publisher) Setup {
-	name := topicExchangeName(exchange)
-	return func(c *Connection) error {
-		if err := c.exchangeDeclare(c.channel, name, kindTopic); err != nil {
-			return errors.Wrapf(err, "failed to declare exchange %s", name)
-		}
-		publisher.connection = c
-		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
-			return err
-		}
-		publisher.exchange = name
-		return nil
-	}
-}
-
-// QueuePublisher sets up a publisher that will send events to a specific queue instead of using the exchange,
-// so called Sender-Selected distribution
-// https://www.rabbitmq.com/sender-selected.html#:~:text=The%20RabbitMQ%20broker%20treats%20the,key%20if%20they%20are%20present.
-func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
-	return func(c *Connection) error {
-		publisher.connection = c
-		if err := publisher.setDefaultHeaders(c.serviceName,
-			Header{Key: "CC", Value: []any{destinationQueueName}},
-		); err != nil {
-			return err
-		}
-		publisher.exchange = ""
-		return nil
-	}
-}
-
-// ServiceResponseConsumer is a specialization of EventStreamConsumer
-// It sets up ap a durable, persistent consumer (exchange->queue) for responses from targetService
-func ServiceResponseConsumer(targetService, routingKey string, handler HandlerFunc, eventType any) Setup {
-	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
-		config := &QueueBindingConfig{
-			routingKey:   routingKey,
-			handler:      handler,
-			eventType:    eventTyp,
-			queueName:    serviceResponseQueueName(targetService, c.serviceName),
-			exchangeName: serviceResponseExchangeName(targetService),
-			kind:         kindHeaders,
-			headers:      amqp.Table{headerService: c.serviceName},
-		}
-
-		return c.messageHandlerBindQueueToExchange(config)
-	}
-}
-
-// ServiceRequestConsumer is a specialization of EventStreamConsumer
-// It sets up ap a durable, persistent consumer (exchange->queue) for message to the service owning the Connection
-func ServiceRequestConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
-	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
-		resExchangeName := serviceResponseExchangeName(c.serviceName)
-		if err := c.exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
-			return errors.Wrapf(err, "failed to create exchange %s", resExchangeName)
-		}
-
-		config := &QueueBindingConfig{
-			routingKey:   routingKey,
-			handler:      handler,
-			eventType:    eventTyp,
-			queueName:    serviceRequestQueueName(c.serviceName),
-			exchangeName: serviceRequestExchangeName(c.serviceName),
-			kind:         kindDirect,
-			headers:      amqp.Table{},
-		}
-
-		return c.messageHandlerBindQueueToExchange(config)
-	}
-}
-
-// ServicePublisher sets up ap a publisher, that sends messages to the targetService
-func ServicePublisher(targetService string, publisher *Publisher) Setup {
-	return func(c *Connection) error {
-		reqExchangeName := serviceRequestExchangeName(targetService)
-		publisher.connection = c
-		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
-			return err
-		}
-		publisher.exchange = reqExchangeName
-		if err := c.exchangeDeclare(c.channel, reqExchangeName, kindDirect); err != nil {
-			return err
-		}
-		return nil
-	}
-}
-
-// RequestResponseHandler is a convenience func to set up ServiceRequestConsumer and combines it with
-// PublishServiceResponse
-func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType any) Setup {
-	return func(c *Connection) error {
-		responseHandlerWrapper := responseWrapper(handler, routingKey, c.PublishServiceResponse)
-		return ServiceRequestConsumer(routingKey, responseHandlerWrapper, eventType)(c)
-	}
-}
-
 // PublishServiceResponse sends a message to targetService as a handler response
 func (c *Connection) PublishServiceResponse(ctx context.Context, targetService, routingKey string, msg any) error {
 	return c.publishMessage(ctx, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
-}
-
-// PublishNotify see amqp.Channel.Confirm
-func PublishNotify(confirm chan amqp.Confirmation) Setup {
-	return func(c *Connection) error {
-		c.channel.NotifyPublish(confirm)
-		return c.channel.Confirm(false)
-	}
 }
 
 func (c *Connection) URI() amqp.URI {
@@ -417,6 +168,27 @@ func (c *Connection) Close() error {
 		return nil
 	}
 	return c.connection.Close()
+}
+
+func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
+	return func(msg any, headers Headers) (response any, err error) {
+		routingKey := headers["routing-key"].(string)
+		typ, exists := c.keyToType[routingKey]
+		if !exists {
+			return nil, fmt.Errorf("no mapped type found for routing key '%s'", routingKey)
+		}
+		body := []byte(*msg.(*json.RawMessage))
+		message, err := c.parseMessage(body, typ)
+		if err != nil {
+			return nil, err
+		} else {
+			if resp, err := handler(message, headers); err == nil {
+				return resp, nil
+			} else {
+				return nil, err
+			}
+		}
+	}
 }
 
 // AmqpChannel wraps the amqp.Channel to allow for mocking
@@ -585,7 +357,7 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 		c.errorLogF("failed to parse message %s", err)
 		_ = d.Reject(false)
 	} else {
-		if _, err := handler(message, headers(d.Headers)); err == nil {
+		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
 			_ = d.Ack(false)
 		} else {
 			c.errorLogF("failed to process message %s", err)
@@ -673,6 +445,8 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 		serviceName:   serviceName,
 		amqpUri:       uri,
 		queueHandlers: &handlers.QueueHandlers[messageHandlerInvoker]{},
+		keyToType:     make(map[string]reflect.Type),
+		typeToKey:     make(map[reflect.Type]string),
 	}
 }
 
@@ -695,8 +469,6 @@ func getEventType(eventType any) (eventType, error) {
 }
 
 type eventType reflect.Type
-
-type routes map[reflect.Type]string
 
 type messageHandlerInvoker struct {
 	msgHandler HandlerFunc

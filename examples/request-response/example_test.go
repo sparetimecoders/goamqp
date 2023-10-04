@@ -38,7 +38,7 @@ func ExampleRequestResponse() {
 	checkError(err)
 
 	clientConnection := Must(NewFromURL("client", amqpURL))
-	publisher := Must(NewPublisher(Route{Type: Request{}, Key: routingKey}))
+	publisher := NewPublisher()
 
 	err = clientConnection.Start(ctx,
 		ServicePublisher("service", publisher),
