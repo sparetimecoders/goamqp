@@ -175,7 +175,7 @@ func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
 		routingKey := headers["routing-key"].(string)
 		typ, exists := c.keyToType[routingKey]
 		if !exists {
-			return nil, fmt.Errorf("no mapped type found for routing key '%s'", routingKey)
+			return nil, nil
 		}
 		body := []byte(*msg.(*json.RawMessage))
 		message, err := c.parseMessage(body, typ)
