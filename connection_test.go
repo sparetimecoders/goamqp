@@ -563,7 +563,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 		wantErr assert.ErrorAssertionFunc
 	}{
 		{
-			name:   "no mapped type",
+			name:   "no mapped type, ignored",
 			fields: fields{},
 			args: args{
 				msg: []byte(`{"a":true}`),
@@ -574,10 +574,8 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 					}
 				},
 			},
-			want: nil,
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.EqualError(t, err, "no mapped type found for routing key 'unknown'")
-			},
+			want:    nil,
+			wantErr: assert.NoError,
 		},
 		{
 			name: "parse error",
