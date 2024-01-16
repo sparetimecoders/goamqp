@@ -55,7 +55,7 @@ type Connection struct {
 	// messageLogger defaults to noOpMessageLogger, can be overridden with UseMessageLogger
 	messageLogger MessageLogger
 	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
-	errorLogF errorLogf
+	errorLog  errorLog
 	typeToKey map[reflect.Type]string
 	keyToType map[string]reflect.Type
 }
@@ -136,7 +136,7 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 		return ErrAlreadyStarted
 	}
 	c.messageLogger = noOpMessageLogger()
-	c.errorLogF = noOpLogger
+	c.errorLog = noOpLogger
 	if c.channel == nil {
 		err := c.connectToAmqpURL()
 		if err != nil {
@@ -354,13 +354,13 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType eventTyp
 func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType) {
 	message, err := c.parseMessage(d.Body, eventType)
 	if err != nil {
-		c.errorLogF("failed to parse message %s", err)
+		c.errorLog(fmt.Sprintf("failed to parse message %s", err))
 		_ = d.Reject(false)
 	} else {
 		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
 			_ = d.Ack(false)
 		} else {
-			c.errorLogF("failed to process message %s", err)
+			c.errorLog(fmt.Sprintf("failed to process message %s", err))
 			_ = d.Nack(false, true)
 		}
 	}

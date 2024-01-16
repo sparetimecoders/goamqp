@@ -67,12 +67,12 @@ func CloseListener(e chan error) Setup {
 }
 
 // UseLogger allows an errorLogf to be used to log errors during processing of messages
-func UseLogger(logger errorLogf) Setup {
+func UseLogger(logger errorLog) Setup {
 	return func(c *Connection) error {
 		if logger == nil {
 			return ErrNilLogger
 		}
-		c.errorLogF = logger
+		c.errorLog = logger
 		return nil
 	}
 }

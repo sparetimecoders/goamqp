@@ -36,16 +36,16 @@ import (
 )
 
 func Test_UseLogger(t *testing.T) {
-	conn := &Connection{errorLogF: nil}
+	conn := &Connection{errorLog: nil}
 	logger := noOpLogger
 	loggerName := runtime.FuncForPC(reflect.ValueOf(logger).Pointer()).Name()
 	require.NoError(t, UseLogger(logger)(conn))
-	setLoggerName := runtime.FuncForPC(reflect.ValueOf(conn.errorLogF).Pointer()).Name()
+	setLoggerName := runtime.FuncForPC(reflect.ValueOf(conn.errorLog).Pointer()).Name()
 	require.Equal(t, loggerName, setLoggerName)
 
-	conn = &Connection{errorLogF: nil}
+	conn = &Connection{errorLog: nil}
 	require.EqualError(t, UseLogger(nil)(conn), "cannot use nil as logger func")
-	require.Nil(t, conn.errorLogF)
+	require.Nil(t, conn.errorLog)
 }
 
 func Test_CloseListener(t *testing.T) {
