@@ -23,7 +23,7 @@
 package goamqp
 
 // errorLogf function called for error logs
-type errorLogf func(s string, a ...any)
+type errorLog func(s string)
 
 // noOpLogger log function that does nothing
-var noOpLogger = func(s string, a ...any) {}
+var noOpLogger = func(s string) {}

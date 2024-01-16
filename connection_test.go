@@ -437,7 +437,7 @@ func Test_DivertToMessageHandler(t *testing.T) {
 		started:       true,
 		channel:       &channel,
 		messageLogger: noOpMessageLogger(),
-		errorLogF:     noOpLogger,
+		errorLog:      noOpLogger,
 	}
 	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0].Handlers)
 
@@ -497,7 +497,7 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 	}
 	c := &Connection{
 		messageLogger: noOpMessageLogger(),
-		errorLogF:     noOpLogger,
+		errorLog:      noOpLogger,
 	}
 	c.handleMessage(delivery, func(i any, headers Headers) (any, error) {
 		if handle {
