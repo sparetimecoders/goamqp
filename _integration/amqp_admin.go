@@ -186,19 +186,16 @@ type Queue struct {
 }
 
 type Binding struct {
-	Source          string `json:"source"`
-	Vhost           string `json:"vhost"`
-	Destination     string `json:"destination"`
-	DestinationType string `json:"destination_type"`
-	RoutingKey      string `json:"routing_key"`
-	Arguments       struct {
-	} `json:"arguments"`
+	Source          string   `json:"source"`
+	Vhost           string   `json:"vhost"`
+	Destination     string   `json:"destination"`
+	DestinationType string   `json:"destination_type"`
+	RoutingKey      string   `json:"routing_key"`
+	Arguments       struct{} `json:"arguments"`
 }
 
 func (q Queue) Named() string {
 	return q.Name
 }
 
-var (
-	defaultExchanges = []string{"", "amq.direct", "amq.fanout", "amq.headers", "amq.match", "amq.rabbitmq.trace", "amq.topic"}
-)
+var defaultExchanges = []string{"", "amq.direct", "amq.fanout", "amq.headers", "amq.match", "amq.rabbitmq.trace", "amq.topic"}

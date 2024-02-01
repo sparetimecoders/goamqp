@@ -42,7 +42,7 @@ import (
 // HandlerFunc is used to process an incoming message
 // If processing fails, an error should be returned and the message will be re-queued
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
-type HandlerFunc func(msg any, headers Headers) (response any, err error)
+type HandlerFunc func(ctx context.Context, msg any, headers Headers) (response any, err error)
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
@@ -171,7 +171,7 @@ func (c *Connection) Close() error {
 }
 
 func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
-	return func(msg any, headers Headers) (response any, err error) {
+	return func(ctx context.Context, msg any, headers Headers) (response any, err error) {
 		routingKey := headers["routing-key"].(string)
 		typ, exists := c.keyToType[routingKey]
 		if !exists {
@@ -182,7 +182,7 @@ func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
 		if err != nil {
 			return nil, err
 		} else {
-			if resp, err := handler(message, headers); err == nil {
+			if resp, err := handler(ctx, message, headers); err == nil {
 				return resp, nil
 			} else {
 				return nil, err
@@ -242,8 +242,8 @@ func amqpVersion() string {
 }
 
 func responseWrapper(handler HandlerFunc, routingKey string, publisher ServiceResponsePublisher) HandlerFunc {
-	return func(msg any, headers Headers) (response any, err error) {
-		resp, err := handler(msg, headers)
+	return func(ctx context.Context, msg any, headers Headers) (response any, err error) {
+		resp, err := handler(ctx, msg, headers)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to process message")
 		}
@@ -351,13 +351,13 @@ func (c *Connection) addHandler(queueName, routingKey string, eventType eventTyp
 	return c.queueHandlers.Add(queueName, routingKey, mHI)
 }
 
-func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType) {
+func (c *Connection) handleMessage(ctx context.Context, d amqp.Delivery, handler HandlerFunc, eventType eventType) {
 	message, err := c.parseMessage(d.Body, eventType)
 	if err != nil {
 		c.errorLog(fmt.Sprintf("failed to parse message %s", err))
 		_ = d.Reject(false)
 	} else {
-		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
+		if _, err := handler(ctx, message, headers(d.Headers, d.RoutingKey)); err == nil {
 			_ = d.Ack(false)
 		} else {
 			c.errorLog(fmt.Sprintf("failed to process message %s", err))
@@ -400,8 +400,10 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers *handlers.Handlers[messageHandlerInvoker]) {
 	for d := range deliveries {
 		if h, ok := handlers.Get(d.RoutingKey); ok {
+			// TODO More here..
+			ctx := context.Background()
 			c.messageLogger(d.Body, h.eventType, d.RoutingKey, false)
-			c.handleMessage(d, h.msgHandler, h.eventType)
+			c.handleMessage(ctx, d, h.msgHandler, h.eventType)
 		} else {
 			// Unhandled message, drop it
 			_ = d.Reject(false)
@@ -428,17 +430,23 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) 
 
 type kind string
 
-const kindDirect = "direct"
-const kindHeaders = "headers"
-const kindTopic = "topic"
+const (
+	kindDirect  = "direct"
+	kindHeaders = "headers"
+	kindTopic   = "topic"
+)
 
-const headerService = "service"
-const headerExpires = "x-expires"
+const (
+	headerService = "service"
+	headerExpires = "x-expires"
+)
 
 const contentType = "application/json"
 
-var deleteQueueAfter = 5 * 24 * time.Hour
-var queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
+var (
+	deleteQueueAfter       = 5 * 24 * time.Hour
+	queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
+)
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{

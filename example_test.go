@@ -22,15 +22,20 @@ package goamqp_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
+var amqpURL = "amqp://user:password@localhost:5672/"
+
 func Example() {
 	ctx := context.Background()
 
-	amqpURL := "amqp://user:password@localhost:5672/"
+	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
+		amqpURL = urlFromEnv
+	}
 	publisher := NewPublisher()
 
 	connection := Must(NewFromURL("service", amqpURL))
@@ -54,7 +59,7 @@ func checkError(err error) {
 	}
 }
 
-func process(m any, headers Headers) (any, error) {
+func process(ctx context.Context, m any, headers Headers) (any, error) {
 	fmt.Printf("Called process with %v\n", m.(*IncomingMessage).Data)
 	return nil, nil
 }

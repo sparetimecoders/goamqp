@@ -22,18 +22,19 @@ package event_stream
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
-var (
-	amqpURL = "amqp://user:password@localhost:5672/test"
-)
+var amqpURL = "amqp://user:password@localhost:5672/test"
 
 func ExampleEventStream() {
 	ctx := context.Background()
-
+	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
+		amqpURL = urlFromEnv
+	}
 	orderServiceConnection := Must(NewFromURL("order-service", amqpURL))
 	orderPublisher := NewPublisher()
 	err := orderServiceConnection.Start(ctx,
@@ -76,7 +77,7 @@ func (s *StatService) Start(ctx context.Context) error {
 	)
 }
 
-func (s *StatService) handleOrderEvent(msg any, headers Headers) (response any, err error) {
+func (s *StatService) handleOrderEvent(ctx context.Context, msg any, headers Headers) (response any, err error) {
 	switch msg.(type) {
 	case *OrderCreated:
 		// Just to make sure the Output is correct in the example...
@@ -105,7 +106,7 @@ func (s *ShippingService) Start(ctx context.Context) error {
 	)
 }
 
-func (s *ShippingService) handleOrderEvent(msg any, headers Headers) (response any, err error) {
+func (s *ShippingService) handleOrderEvent(ctx context.Context, msg any, headers Headers) (response any, err error) {
 	switch msg.(type) {
 	case *OrderCreated:
 		fmt.Println("Order created")
