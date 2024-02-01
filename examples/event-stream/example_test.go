@@ -22,18 +22,19 @@ package event_stream
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
-var (
-	amqpURL = "amqp://user:password@localhost:5672/test"
-)
+var amqpURL = "amqp://user:password@localhost:5672/test"
 
 func ExampleEventStream() {
 	ctx := context.Background()
-
+	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
+		amqpURL = urlFromEnv
+	}
 	orderServiceConnection := Must(NewFromURL("order-service", amqpURL))
 	orderPublisher := NewPublisher()
 	err := orderServiceConnection.Start(ctx,

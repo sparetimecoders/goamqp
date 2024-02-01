@@ -282,8 +282,10 @@ func Test_Consume(t *testing.T) {
 	_, err := consume(channel, "q")
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.Consumers))
-	require.Equal(t, Consumer{queue: "q",
-		consumer: "", autoAck: false, exclusive: false, noLocal: false, noWait: false, args: amqp.Table{}}, channel.Consumers[0])
+	require.Equal(t, Consumer{
+		queue:    "q",
+		consumer: "", autoAck: false, exclusive: false, noLocal: false, noWait: false, args: amqp.Table{},
+	}, channel.Consumers[0])
 }
 
 func Test_Publish(t *testing.T) {
@@ -401,7 +403,6 @@ func TestResponseWrapper(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func Test_DivertToMessageHandler(t *testing.T) {

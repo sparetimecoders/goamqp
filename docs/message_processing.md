@@ -44,4 +44,3 @@ If anything but `nil` is returned from `HandlerFunc` the message will be rejecte
 be processed again).
 
 If goamqp fails to unmarshal the JSON content in the message, the message will be rejected and **not** requeued again.
-
