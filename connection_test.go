@@ -102,7 +102,7 @@ func Test_Start_SetupFails(t *testing.T) {
 		queueHandlers: &handlers2.QueueHandlers[messageHandlerInvoker]{},
 	}
 	err := conn.Start(context.Background(),
-		EventStreamConsumer("test", func(i any, headers Headers) (any, error) {
+		EventStreamConsumer("test", func(ctx context.Context, i any, headers Headers) (any, error) {
 			return nil, errors.New("failed")
 		}, Message{}))
 	require.Error(t, err)
@@ -392,9 +392,9 @@ func TestResponseWrapper(t *testing.T) {
 			if tt.headers != nil {
 				headers = *tt.headers
 			}
-			resp, err := responseWrapper(func(i any, headers Headers) (any, error) {
+			resp, err := responseWrapper(func(ctx context.Context, i any, headers Headers) (any, error) {
 				return tt.handlerResp, tt.handlerErr
-			}, "key", p.publish)(&Message{}, headers)
+			}, "key", p.publish)(context.Background(), &Message{}, headers)
 			p.checkPublished(t, tt.published)
 
 			require.Equal(t, tt.wantResp, resp)
@@ -416,7 +416,7 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	handlers := &handlers2.QueueHandlers[messageHandlerInvoker]{}
 	msgInvoker := &messageHandlerInvoker{
 		eventType: reflect.TypeOf(Message{}),
-		msgHandler: func(i any, headers Headers) (any, error) {
+		msgHandler: func(ctx context.Context, i any, headers Headers) (any, error) {
 			if i.(*Message).Ok {
 				return nil, nil
 			}
@@ -500,7 +500,7 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 		messageLogger: noOpMessageLogger(),
 		errorLog:      noOpLogger,
 	}
-	c.handleMessage(delivery, func(i any, headers Headers) (any, error) {
+	c.handleMessage(context.Background(), delivery, func(ctx context.Context, i any, headers Headers) (any, error) {
 		if handle {
 			return nil, nil
 		}
@@ -570,7 +570,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 				msg: []byte(`{"a":true}`),
 				key: "unknown",
 				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+					return func(ctx context.Context, msg any, headers Headers) (response any, err error) {
 						return nil, nil
 					}
 				},
@@ -589,7 +589,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 				msg: []byte(`{"a:}`),
 				key: "known",
 				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+					return func(ctx context.Context, msg any, headers Headers) (response any, err error) {
 						return nil, nil
 					}
 				},
@@ -610,7 +610,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 				msg: []byte(`{"a":true}`),
 				key: "known",
 				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+					return func(ctx context.Context, msg any, headers Headers) (response any, err error) {
 						assert.IsType(t, &TestMessage{}, msg)
 						return nil, fmt.Errorf("handler-error")
 					}
@@ -632,7 +632,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 				msg: []byte(`{"a":true}`),
 				key: "known",
 				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+					return func(ctx context.Context, msg any, headers Headers) (response any, err error) {
 						assert.IsType(t, &TestMessage{}, msg)
 						return "OK", nil
 					}
@@ -650,7 +650,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 			}
 
 			handler := c.TypeMappingHandler(tt.args.handler(t))
-			res, err := handler(&tt.args.msg, headers(make(amqp.Table), tt.args.key))
+			res, err := handler(context.Background(), &tt.args.msg, headers(make(amqp.Table), tt.args.key))
 			if !tt.wantErr(t, err) {
 				return
 			}

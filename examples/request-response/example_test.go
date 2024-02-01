@@ -65,14 +65,14 @@ func checkError(err error) {
 	}
 }
 
-func handleRequest(m any, headers Headers) (any, error) {
+func handleRequest(ctx context.Context, m any, headers Headers) (any, error) {
 	request := m.(*Request)
 	response := Response{Data: request.Data}
 	fmt.Printf("Called process with %v, returning response %v\n", request.Data, response)
 	return response, nil
 }
 
-func handleResponse(m any, headers Headers) (any, error) {
+func handleResponse(ctx context.Context, m any, headers Headers) (any, error) {
 	response := m.(*Response)
 	fmt.Printf("Got response, returning response %v\n", response.Data)
 	return nil, nil
