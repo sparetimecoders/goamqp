@@ -76,7 +76,7 @@ func (s *StatService) Start(ctx context.Context) error {
 	)
 }
 
-func (s *StatService) handleOrderEvent(msg any, headers Headers) (response any, err error) {
+func (s *StatService) handleOrderEvent(ctx context.Context, msg any, headers Headers) (response any, err error) {
 	switch msg.(type) {
 	case *OrderCreated:
 		// Just to make sure the Output is correct in the example...
@@ -105,7 +105,7 @@ func (s *ShippingService) Start(ctx context.Context) error {
 	)
 }
 
-func (s *ShippingService) handleOrderEvent(msg any, headers Headers) (response any, err error) {
+func (s *ShippingService) handleOrderEvent(ctx context.Context, msg any, headers Headers) (response any, err error) {
 	switch msg.(type) {
 	case *OrderCreated:
 		fmt.Println("Order created")
