@@ -69,7 +69,6 @@ func (h *QueueHandlers[T]) Add(queueName, routingKey string, handler *T) error {
 
 	if mappedRoutingKey, exists := queueHandlers.exists(routingKey); exists {
 		return fmt.Errorf("routingkey %s overlaps %s for queue %s, consider using AddQueueNameSuffix", routingKey, mappedRoutingKey, queueName)
-
 	}
 	queueHandlers.add(routingKey, handler)
 	return nil

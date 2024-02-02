@@ -22,15 +22,19 @@ package goamqp_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
+var amqpURL = "amqp://user:password@localhost:5672/"
+
 func Example() {
 	ctx := context.Background()
-
-	amqpURL := "amqp://user:password@localhost:5672/"
+	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
+		amqpURL = urlFromEnv
+	}
 	publisher := NewPublisher()
 
 	connection := Must(NewFromURL("service", amqpURL))

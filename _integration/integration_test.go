@@ -200,7 +200,8 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
 			Arguments:       struct{}{},
-		}}, requestBinding)
+		},
+	}, requestBinding)
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
@@ -224,8 +225,8 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
 			Arguments:       struct{}{},
-		}}, responseBinding)
-
+		},
+	}, responseBinding)
 }
 
 func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
@@ -303,7 +304,8 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
 			Arguments:       struct{}{},
-		}}, client1Binding)
+		},
+	}, client1Binding)
 
 	client2Queue, err := suite.admin.GetQueue("events.topic.exchange.queue.client2")
 	require.NoError(suite.T(), err)
@@ -330,8 +332,8 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
 			Arguments:       struct{}{},
-		}}, client2Binding)
-
+		},
+	}, client2Binding)
 }
 
 func (suite *IntegrationTestSuite) Test_EventStream() {
@@ -449,6 +451,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	require.Equal(suite.T(), 1, len(queuesAfterClose))
 	require.Equal(suite.T(), "events.topic.exchange.queue.client1", queuesAfterClose[0].Name)
 }
+
 func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	closer := make(chan bool, 2)
 	wildcardRoutingKey := "test.#"

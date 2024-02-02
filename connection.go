@@ -428,17 +428,23 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) 
 
 type kind string
 
-const kindDirect = "direct"
-const kindHeaders = "headers"
-const kindTopic = "topic"
+const (
+	kindDirect  = "direct"
+	kindHeaders = "headers"
+	kindTopic   = "topic"
+)
 
-const headerService = "service"
-const headerExpires = "x-expires"
+const (
+	headerService = "service"
+	headerExpires = "x-expires"
+)
 
 const contentType = "application/json"
 
-var deleteQueueAfter = 5 * 24 * time.Hour
-var queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
+var (
+	deleteQueueAfter       = 5 * 24 * time.Hour
+	queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
+)
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
