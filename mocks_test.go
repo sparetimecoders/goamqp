@@ -109,10 +109,12 @@ func (a *MockAcknowledger) Ack(tag uint64, multiple bool) error {
 	a.Acks <- Ack{tag, multiple}
 	return nil
 }
+
 func (a *MockAcknowledger) Nack(tag uint64, multiple bool, requeue bool) error {
 	a.Nacks <- Nack{tag, multiple, requeue}
 	return nil
 }
+
 func (a *MockAcknowledger) Reject(tag uint64, requeue bool) error {
 	a.Rejects <- Reject{tag, requeue}
 	return nil
@@ -170,6 +172,7 @@ func (m *MockAmqpChannel) Consume(queue, consumer string, autoAck, exclusive, no
 	m.Consumers = append(m.Consumers, Consumer{queue, consumer, autoAck, exclusive, noLocal, noWait, args})
 	return m.Delivery, nil
 }
+
 func (m *MockAmqpChannel) ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error {
 	if m.ExchangeDeclarationError != nil {
 		return *m.ExchangeDeclarationError
@@ -178,9 +181,11 @@ func (m *MockAmqpChannel) ExchangeDeclare(name, kind string, durable, autoDelete
 	m.ExchangeDeclarations = append(m.ExchangeDeclarations, ExchangeDeclaration{name, kind, durable, autoDelete, internal, noWait, args})
 	return nil
 }
+
 func (m *MockAmqpChannel) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	return m.PublishWithContext(context.Background(), exchange, key, mandatory, immediate, msg)
 }
+
 func (m *MockAmqpChannel) PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	if key == "failed" {
 		return errors.New("failed")
@@ -194,6 +199,7 @@ func (m *MockAmqpChannel) PublishWithContext(ctx context.Context, exchange, key 
 	}
 	return nil
 }
+
 func (m *MockAmqpChannel) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
 	if m.QueueDeclarationError != nil {
 		return amqp.Queue{}, *m.QueueDeclarationError
@@ -239,8 +245,10 @@ func NewMockAcknowledger() MockAcknowledger {
 	}
 }
 
-var _ amqpConnection = &MockAmqpConnection{}
-var _ AmqpChannel = &MockAmqpChannel{}
+var (
+	_ amqpConnection = &MockAmqpConnection{}
+	_ AmqpChannel    = &MockAmqpChannel{}
+)
 
 func mockConnection(channel *MockAmqpChannel) *Connection {
 	c := newConnection("svc", amqp.URI{})

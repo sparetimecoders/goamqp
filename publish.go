@@ -37,10 +37,8 @@ type Publisher struct {
 	defaultHeaders []Header
 }
 
-var (
-	// ErrNoRouteForMessageType when the published message cannot be routed.
-	ErrNoRouteForMessageType = fmt.Errorf("no routingkey configured for message of type")
-)
+// ErrNoRouteForMessageType when the published message cannot be routed.
+var ErrNoRouteForMessageType = fmt.Errorf("no routingkey configured for message of type")
 
 // NewPublisher returns a publisher that can be used to send messages
 func NewPublisher() *Publisher {

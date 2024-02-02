@@ -22,15 +22,20 @@ package request_response
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
+var amqpURL = "amqp://user:password@localhost:5672/test"
+
 func ExampleRequestResponse() {
-	amqpURL := "amqp://user:password@localhost:5672/test"
-	routingKey := "key"
 	ctx := context.Background()
+	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
+		amqpURL = urlFromEnv
+	}
+	routingKey := "key"
 	serviceConnection := Must(NewFromURL("service", amqpURL))
 	err := serviceConnection.Start(ctx,
 		RequestResponseHandler(routingKey, handleRequest, Request{}),
