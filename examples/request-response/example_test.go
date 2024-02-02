@@ -1,4 +1,4 @@
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -38,7 +38,7 @@ func Example_request_response() {
 	routingKey := "key"
 	serviceConnection := Must(NewFromURL("service", amqpURL))
 	err := serviceConnection.Start(ctx,
-		RequestResponseHandler(routingKey, handleRequest, Request{}),
+		RequestResponseHandler(routingKey, handleRequest),
 	)
 	checkError(err)
 
@@ -46,17 +46,22 @@ func Example_request_response() {
 	publisher := NewPublisher()
 
 	err = clientConnection.Start(ctx,
+		WithTypeMapping(routingKey, Request{}),
 		ServicePublisher("service", publisher),
 		ServiceResponseConsumer("service", routingKey, handleResponse, Response{}),
 	)
 	checkError(err)
 
-	err = publisher.PublishWithContext(context.Background(), Request{Data: "test"})
+	err = publisher.Publish(context.Background(), Request{Data: "test"})
 	checkError(err)
 
 	time.Sleep(time.Second)
 	_ = serviceConnection.Close()
 	_ = clientConnection.Close()
+
+	// Output:
+	//Called process with test, returning response {test}
+	//Got response, test
 }
 
 func checkError(err error) {
@@ -65,16 +70,14 @@ func checkError(err error) {
 	}
 }
 
-func handleRequest(m any, headers Headers) (any, error) {
-	request := m.(*Request)
-	response := Response{Data: request.Data}
-	fmt.Printf("Called process with %v, returning response %v\n", request.Data, response)
+func handleRequest(ctx context.Context, m ConsumableEvent[Request]) (any, error) {
+	response := Response{Data: m.Payload.Data}
+	fmt.Printf("Called process with %v, returning response %v\n", m.Payload.Data, response)
 	return response, nil
 }
 
-func handleResponse(m any, headers Headers) (any, error) {
-	response := m.(*Response)
-	fmt.Printf("Got response, returning response %v\n", response.Data)
+func handleResponse(ctx context.Context, m ConsumableEvent[Response]) (any, error) {
+	fmt.Printf("Got response, %v\n", m.Payload.Data)
 	return nil, nil
 }
 

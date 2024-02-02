@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,22 @@ func WithTypeMapping(routingKey string, msgType any) Setup {
 	}
 }
 
+func WithHandler[T any](routingKey string, handler EventHandler[T]) Setup {
+	exchangeName := topicExchangeName(defaultEventExchangeName)
+	return func(c *Connection) error {
+		config := &QueueBindingConfig{
+			routingKey:   routingKey,
+			handler:      newWrappedHandler(handler),
+			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
+			exchangeName: exchangeName,
+			kind:         kindTopic,
+			headers:      amqp.Table{},
+		}
+
+		return c.messageHandlerBindQueueToExchange(config)
+	}
+}
+
 // CloseListener receives a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {
 	return func(c *Connection) error {
@@ -62,28 +78,6 @@ func CloseListener(e chan error) Setup {
 			}
 		}()
 		c.channel.NotifyClose(temp)
-		return nil
-	}
-}
-
-// UseLogger allows an errorLogf to be used to log errors during processing of messages
-func UseLogger(logger errorLog) Setup {
-	return func(c *Connection) error {
-		if logger == nil {
-			return ErrNilLogger
-		}
-		c.errorLog = logger
-		return nil
-	}
-}
-
-// UseMessageLogger allows a MessageLogger to be used when log in/outgoing messages
-func UseMessageLogger(logger MessageLogger) Setup {
-	return func(c *Connection) error {
-		if logger == nil {
-			return ErrNilLogger
-		}
-		c.messageLogger = logger
 		return nil
 	}
 }
@@ -107,14 +101,14 @@ func WithPrefetchLimit(limit int) Setup {
 // TransientEventStreamConsumer sets up an event stream consumer that will clean up resources when the
 // connection is closed.
 // For a durable queue, use the EventStreamConsumer function instead.
-func TransientEventStreamConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
-	return TransientStreamConsumer(defaultEventExchangeName, routingKey, handler, eventType)
+func TransientEventStreamConsumer[T any](routingKey string, handler EventHandler[T]) Setup {
+	return TransientStreamConsumer(defaultEventExchangeName, routingKey, handler)
 }
 
 // EventStreamConsumer sets up ap a durable, persistent event stream consumer.
 // For a transient queue, use the TransientEventStreamConsumer function instead.
-func EventStreamConsumer(routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
-	return StreamConsumer(defaultEventExchangeName, routingKey, handler, eventType, opts...)
+func EventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts ...QueueBindingConfigSetup) Setup {
+	return StreamConsumer(defaultEventExchangeName, routingKey, handler, opts...)
 }
 
 // EventStreamPublisher sets up an event stream publisher
@@ -125,18 +119,11 @@ func EventStreamPublisher(publisher *Publisher) Setup {
 // TransientStreamConsumer sets up an event stream consumer that will clean up resources when the
 // connection is closed.
 // For a durable queue, use the StreamConsumer function instead.
-func TransientStreamConsumer(exchange, routingKey string, handler HandlerFunc, eventType any) Setup {
+func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHandler[T]) Setup {
 	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
-		if err := c.addHandler(queueName, routingKey, eventTyp, &messageHandlerInvoker{
-			msgHandler: handler,
-			eventType:  eventTyp,
-		}); err != nil {
+		if err := c.addHandler(queueName, routingKey, newWrappedHandler(handler)); err != nil {
 			return err
 		}
 
@@ -151,17 +138,12 @@ func TransientStreamConsumer(exchange, routingKey string, handler HandlerFunc, e
 }
 
 // StreamConsumer sets up ap a durable, persistent event stream consumer.
-func StreamConsumer(exchange, routingKey string, handler HandlerFunc, eventType any, opts ...QueueBindingConfigSetup) Setup {
+func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T], opts ...QueueBindingConfigSetup) Setup {
 	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
-			handler:      handler,
-			eventType:    eventTyp,
+			handler:      newWrappedHandler(handler),
 			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
 			exchangeName: exchangeName,
 			kind:         kindTopic,
@@ -211,16 +193,11 @@ func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 
 // ServiceResponseConsumer is a specialization of EventStreamConsumer
 // It sets up ap a durable, persistent consumer (exchange->queue) for responses from targetService
-func ServiceResponseConsumer(targetService, routingKey string, handler HandlerFunc, eventType any) Setup {
+func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T], eventType any) Setup {
 	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
-			handler:      handler,
-			eventType:    eventTyp,
+			handler:      newWrappedHandler(handler),
 			queueName:    serviceResponseQueueName(targetService, c.serviceName),
 			exchangeName: serviceResponseExchangeName(targetService),
 			kind:         kindHeaders,
@@ -233,12 +210,8 @@ func ServiceResponseConsumer(targetService, routingKey string, handler HandlerFu
 
 // ServiceRequestConsumer is a specialization of EventStreamConsumer
 // It sets up ap a durable, persistent consumer (exchange->queue) for message to the service owning the Connection
-func ServiceRequestConsumer(routingKey string, handler HandlerFunc, eventType any) Setup {
+func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T]) Setup {
 	return func(c *Connection) error {
-		eventTyp, err := getEventType(eventType)
-		if err != nil {
-			return err
-		}
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
 		if err := c.exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
 			return errors.Wrapf(err, "failed to create exchange %s", resExchangeName)
@@ -246,8 +219,7 @@ func ServiceRequestConsumer(routingKey string, handler HandlerFunc, eventType an
 
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
-			handler:      handler,
-			eventType:    eventTyp,
+			handler:      newWrappedHandler(handler),
 			queueName:    serviceRequestQueueName(c.serviceName),
 			exchangeName: serviceRequestExchangeName(c.serviceName),
 			kind:         kindDirect,
@@ -276,10 +248,10 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 
 // RequestResponseHandler is a convenience func to set up ServiceRequestConsumer and combines it with
 // PublishServiceResponse
-func RequestResponseHandler(routingKey string, handler HandlerFunc, eventType any) Setup {
+func RequestResponseHandler[T any](routingKey string, handler EventHandler[T]) Setup {
 	return func(c *Connection) error {
 		responseHandlerWrapper := responseWrapper(handler, routingKey, c.PublishServiceResponse)
-		return ServiceRequestConsumer(routingKey, responseHandlerWrapper, eventType)(c)
+		return ServiceRequestConsumer[T](routingKey, responseHandlerWrapper)(c)
 	}
 }
 

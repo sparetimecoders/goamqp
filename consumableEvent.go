@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,39 @@
 
 package goamqp
 
-// errorLogf function called for error logs
-type errorLog func(s string)
+import (
+	"encoding/json"
+	"time"
+)
 
-// noOpLogger log function that does nothing
-var noOpLogger = func(s string) {}
+// Metadata holds the metadata of an event.
+type Metadata struct {
+	ID            string    `json:"id"`
+	CorrelationID string    `json:"correlationId"`
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+// DeliveryInfo holds information of original queue, exchange and routing keys.
+type DeliveryInfo struct {
+	Queue      string
+	Exchange   string
+	RoutingKey string
+	Headers    Headers
+}
+
+// ConsumableEvent represents an event that can be consumed.
+// The type parameter T specifies the type of the event's payload.
+type ConsumableEvent[T any] struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      T
+}
+
+// unmarshalEvent is used internally to unmarshal a PublishableEvent
+// this way the payload ends up being a json.RawMessage instead of map[string]interface{}
+// so that later the json.RawMessage can be unmarshal to ConsumableEvent[T].Payload.
+type unmarshalEvent struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      json.RawMessage
+}
