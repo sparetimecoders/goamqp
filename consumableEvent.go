@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,40 +20,41 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package handlers
+package goamqp
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
+	"encoding/json"
+	"time"
 )
 
-// overlaps checks if two AMQP binding patterns overlap
-func overlaps(p1, p2 string) bool {
-	if p1 == p2 {
-		return true
-	} else if match(p1, p2) {
-		return true
-	} else if match(p2, p1) {
-		return true
-	}
-	return false
+// Metadata holds the metadata of an event.
+type Metadata struct {
+	ID            string    `json:"id"`
+	CorrelationID string    `json:"correlationId"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
-// match returns true if the AMQP binding pattern is matching the routing key
-func match(pattern string, routingKey string) bool {
-	b, err := regexp.MatchString(fixRegex(pattern), routingKey)
-	if err != nil {
-		return false
-	}
-	return b
+// DeliveryInfo holds information of original queue, exchange and routing keys.
+type DeliveryInfo struct {
+	Queue      string
+	Exchange   string
+	RoutingKey string
+	Headers    Headers
 }
 
-// fixRegex converts the AMQP binding key syntax to regular expression
-// For example:
-// user.* => user\.[^.]*
-// user.# => user\..*
-func fixRegex(s string) string {
-	replace := strings.Replace(strings.Replace(strings.Replace(s, ".", "\\.", -1), "*", "[^.]*", -1), "#", ".*", -1)
-	return fmt.Sprintf("^%s$", replace)
+// ConsumableEvent represents an event that can be consumed.
+// The type parameter T specifies the type of the event's payload.
+type ConsumableEvent[T any] struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      T
+}
+
+// unmarshalEvent is used internally to unmarshal a PublishableEvent
+// this way the payload ends up being a json.RawMessage instead of map[string]interface{}
+// so that later the json.RawMessage can be unmarshal to ConsumableEvent[T].Payload.
+type unmarshalEvent struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      json.RawMessage
 }
