@@ -1,4 +1,4 @@
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
 // this software and associated documentation files (the "Software"), to deal in
@@ -23,14 +23,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"testing"
 	"time"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672/test"
+// var amqpURL = "amqp://user:password@localhost:5672/test"
+var amqpURL = "amqp://user:password@goodfeed-control-plane.orb.local:5672/test"
 
-func Example_event_stream() {
+func Test_A(t *testing.T) {
 	ctx := context.Background()
 	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
 		amqpURL = urlFromEnv
@@ -39,6 +41,8 @@ func Example_event_stream() {
 	orderPublisher := NewPublisher()
 	err := orderServiceConnection.Start(ctx,
 		EventStreamPublisher(orderPublisher),
+		WithTypeMapping("Order.Created", OrderCreated{}),
+		WithTypeMapping("Order.Updated", OrderUpdated{}),
 	)
 	checkError(err)
 
@@ -50,14 +54,12 @@ func Example_event_stream() {
 	err = statService.Start(ctx)
 	checkError(err)
 
-	err = orderPublisher.PublishWithContext(context.Background(), OrderCreated{Id: "id"})
+	err = orderPublisher.Publish(context.Background(), OrderCreated{Id: "id"})
 	checkError(err)
-	err = orderPublisher.PublishWithContext(context.Background(), OrderUpdated{Id: "id"})
+	err = orderPublisher.Publish(context.Background(), OrderUpdated{Id: "id", Data: "data"})
 	checkError(err)
-
 	time.Sleep(2 * time.Second)
 	_ = orderServiceConnection.Close()
-	_ = shippingService.Stop()
 	_ = statService.Stop()
 }
 
@@ -73,19 +75,18 @@ func (s *StatService) Stop() error {
 func (s *StatService) Start(ctx context.Context) error {
 	s.connection = Must(NewFromURL("stat-service", amqpURL))
 	return s.connection.Start(ctx,
-		EventStreamConsumer("Order.Created", s.handleOrderEvent, OrderCreated{}),
+		WithHandler("Order.Created", s.handleOrderCreated),
+		WithHandler("Order.Updated", s.handleOrderUpdated),
 	)
 }
 
-func (s *StatService) handleOrderEvent(msg any, headers Headers) (response any, err error) {
-	switch msg.(type) {
-	case *OrderCreated:
-		// Just to make sure the Output is correct in the example...
-		time.Sleep(time.Second)
-		fmt.Println("Increasing order count")
-	default:
-		fmt.Println("Unknown message type")
-	}
+func (s *StatService) handleOrderUpdated(ctx context.Context, msg ConsumableEvent[OrderUpdated]) (response any, err error) {
+	fmt.Printf("Updated order id, %s - %s\n", msg.Payload.Id, msg.Payload.Data)
+	return nil, nil
+}
+func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEvent[OrderCreated]) (response any, err error) {
+	// Just to make sure the Output is correct in the example...
+	fmt.Printf("Created order, %s\n", msg.Payload.Id)
 	return nil, nil
 }
 
@@ -100,13 +101,17 @@ func (s *ShippingService) Stop() error {
 
 func (s *ShippingService) Start(ctx context.Context) error {
 	s.connection = Must(NewFromURL("shipping-service", amqpURL))
+
 	return s.connection.Start(ctx,
-		EventStreamConsumer("Order.Created", s.handleOrderEvent, OrderCreated{}),
-		EventStreamConsumer("Order.Updated", s.handleOrderEvent, OrderUpdated{}),
-	)
+		WithTypeMapping("Order.Created", OrderCreated{}),
+		WithTypeMapping("Order.Updated", OrderUpdated{}),
+		WithHandler("#", s.connection.TypeMappingHandler(func(ctx context.Context, event any) (any, error) {
+			return s.handleOrderEvent(ctx, event)
+		}),
+		))
 }
 
-func (s *ShippingService) handleOrderEvent(msg any, headers Headers) (response any, err error) {
+func (s *ShippingService) handleOrderEvent(ctx context.Context, msg any) (response any, err error) {
 	switch msg.(type) {
 	case *OrderCreated:
 		fmt.Println("Order created")
@@ -128,7 +133,8 @@ type OrderCreated struct {
 	Id string
 }
 type OrderUpdated struct {
-	Id string
+	Id   string
+	Data string
 }
 
 type ShippingUpdated struct {

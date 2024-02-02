@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,40 +20,37 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package handlers
+package goamqp
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
+	"context"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-// overlaps checks if two AMQP binding patterns overlap
-func overlaps(p1, p2 string) bool {
-	if p1 == p2 {
-		return true
-	} else if match(p1, p2) {
-		return true
-	} else if match(p2, p1) {
-		return true
+// inject the span context to amqp table
+func injectToHeaders(ctx context.Context) amqp.Table {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+
+	header := amqp.Table{}
+	for k, v := range carrier {
+		header[k] = v
 	}
-	return false
+	return header
 }
 
-// match returns true if the AMQP binding pattern is matching the routing key
-func match(pattern string, routingKey string) bool {
-	b, err := regexp.MatchString(fixRegex(pattern), routingKey)
-	if err != nil {
-		return false
+// extract the amqp table to a span context
+func extractToContext(headers amqp.Table) context.Context {
+	carrier := propagation.MapCarrier{}
+	for k, v := range headers {
+		value, ok := v.(string)
+		if ok {
+			carrier[k] = value
+		}
 	}
-	return b
-}
 
-// fixRegex converts the AMQP binding key syntax to regular expression
-// For example:
-// user.* => user\.[^.]*
-// user.# => user\..*
-func fixRegex(s string) string {
-	replace := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s, ".", "\\."), "*", "[^.]*"), "#", ".*")
-	return fmt.Sprintf("^%s$", replace)
+	return otel.GetTextMapPropagator().Extract(context.TODO(), carrier)
 }

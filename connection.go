@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,39 +35,28 @@ import (
 
 	"github.com/pkg/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/sparetimecoders/goamqp/internal/handlers"
 )
-
-// HandlerFunc is used to process an incoming message
-// If processing fails, an error should be returned and the message will be re-queued
-// The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
-type HandlerFunc func(msg any, headers Headers) (response any, err error)
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
-	started       bool
-	serviceName   string
-	amqpUri       amqp.URI
-	connection    amqpConnection
+	started     bool
+	serviceName string
+	amqpUri     amqp.URI
+	connection  amqpConnection
+	// TODO One channel per queue/consumer
 	channel       AmqpChannel
-	queueHandlers *handlers.QueueHandlers[messageHandlerInvoker]
-	// messageLogger defaults to noOpMessageLogger, can be overridden with UseMessageLogger
-	messageLogger MessageLogger
-	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
-	errorLog  errorLog
-	typeToKey map[reflect.Type]string
-	keyToType map[string]reflect.Type
+	queueHandlers *QueueHandlers
+	typeToKey     map[reflect.Type]string
+	keyToType     map[string]reflect.Type
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
-type ServiceResponsePublisher func(ctx context.Context, targetService, routingKey string, msg any) error
+type ServiceResponsePublisher[T any] func(ctx context.Context, targetService, routingKey string, msg T) error
 
 // QueueBindingConfig is a wrapper around the actual amqp queue configuration
 type QueueBindingConfig struct {
 	routingKey   string
-	handler      HandlerFunc
-	eventType    eventType
+	handler      wrappedHandler
 	queueName    string
 	exchangeName string
 	kind         kind
@@ -137,8 +126,7 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {
 		return ErrAlreadyStarted
 	}
-	c.messageLogger = noOpMessageLogger()
-	c.errorLog = noOpLogger
+	// TODO Multiple channels
 	if c.channel == nil {
 		err := c.connectToAmqpURL()
 		if err != nil {
@@ -146,6 +134,7 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 		}
 	}
 
+	// TODO Qos from opt (per queue?)
 	if err := c.channel.Qos(20, 0, true); err != nil {
 		return err
 	}
@@ -172,23 +161,21 @@ func (c *Connection) Close() error {
 	return c.connection.Close()
 }
 
-func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
-	return func(msg any, headers Headers) (response any, err error) {
-		routingKey := headers["routing-key"].(string)
+func (c *Connection) TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
+	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) (any, error) {
+		routingKey := event.DeliveryInfo.RoutingKey
 		typ, exists := c.keyToType[routingKey]
 		if !exists {
 			return nil, nil
 		}
-		body := []byte(*msg.(*json.RawMessage))
-		message, err := c.parseMessage(body, typ)
-		if err != nil {
+		message := reflect.New(typ).Interface()
+		if err := json.Unmarshal(event.Payload, &message); err != nil {
 			return nil, err
+		}
+		if resp, err := handler(ctx, message); err == nil {
+			return resp, nil
 		} else {
-			if resp, err := handler(message, headers); err == nil {
-				return resp, nil
-			} else {
-				return nil, err
-			}
+			return nil, err
 		}
 	}
 }
@@ -198,8 +185,6 @@ type AmqpChannel interface {
 	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
-	// Deprecated: Use PublishWithContext instead.
-	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
@@ -231,7 +216,7 @@ func dialConfig(url string, cfg amqp.Config) (amqpConnection, error) {
 
 var dialAmqp = dialConfig
 
-func amqpVersion() string {
+func version() string {
 	// NOTE: this doesn't work outside of a build, se we can't really test it
 	if x, ok := debug.ReadBuildInfo(); ok {
 		for _, y := range x.Deps {
@@ -243,20 +228,19 @@ func amqpVersion() string {
 	return "_unknown_"
 }
 
-func responseWrapper(handler HandlerFunc, routingKey string, publisher ServiceResponsePublisher) HandlerFunc {
-	return func(msg any, headers Headers) (response any, err error) {
-		resp, err := handler(msg, headers)
+func responseWrapper[T, R any](handler EventHandler[T], routingKey string, publisher ServiceResponsePublisher[R]) EventHandler[T] {
+	return func(ctx context.Context, event ConsumableEvent[T]) (response any, err error) {
+		resp, err := handler(ctx, event)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to process message")
 		}
 		if resp != nil {
-			service, err := sendingService(headers)
+			service, err := sendingService(event.DeliveryInfo)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to extract service name")
 			}
-			// TODO Pass context to HandlerFunc instead and use here?
-			ctx := context.Background()
-			err = publisher(ctx, service, routingKey, resp)
+			// TODO Handle response with type R
+			err = publisher(ctx, service, routingKey, resp.(R))
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to publish response")
 			}
@@ -306,7 +290,7 @@ func amqpConfig(serviceName string) amqp.Config {
 		Heartbeat:  10 * time.Second,
 		Locale:     "en_US",
 	}
-	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, amqpVersion(), hostName()))
+	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, version(), hostName()))
 	return config
 }
 
@@ -325,6 +309,7 @@ func (c *Connection) connectToAmqpURL() error {
 	if err != nil {
 		return err
 	}
+	// TODO Multiple channels
 	ch, err := conn.Channel()
 	if err != nil {
 		return err
@@ -349,34 +334,8 @@ func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind
 	)
 }
 
-func (c *Connection) addHandler(queueName, routingKey string, eventType eventType, mHI *messageHandlerInvoker) error {
-	return c.queueHandlers.Add(queueName, routingKey, mHI)
-}
-
-func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType) {
-	message, err := c.parseMessage(d.Body, eventType)
-	if err != nil {
-		c.errorLog(fmt.Sprintf("failed to parse message %s", err))
-		_ = d.Reject(false)
-	} else {
-		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
-			_ = d.Ack(false)
-		} else {
-			if !errors.Is(err, ErrRecoverable) {
-				c.errorLog(fmt.Sprintf("failed to process message %s", err))
-			}
-			_ = d.Nack(false, true)
-		}
-	}
-}
-
-func (c *Connection) parseMessage(jsonContent []byte, eventType eventType) (any, error) {
-	target := reflect.New(eventType).Interface()
-	if err := json.Unmarshal(jsonContent, &target); err != nil {
-		return nil, err
-	}
-
-	return target, nil
+func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
+	return c.queueHandlers.Add(queueName, routingKey, handler)
 }
 
 func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, exchangeName string, headers amqp.Table) error {
@@ -384,7 +343,6 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 	if err != nil {
 		return err
 	}
-	c.messageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
 
 	publishing := amqp.Publishing{
 		Body:         jsonBytes,
@@ -401,23 +359,56 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 	)
 }
 
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers *handlers.Handlers[messageHandlerInvoker]) {
-	for d := range deliveries {
-		if h, ok := handlers.Get(d.RoutingKey); ok {
-			c.messageLogger(d.Body, h.eventType, d.RoutingKey, false)
-			c.handleMessage(d, h.msgHandler, h.eventType)
-		} else {
-			// Unhandled message, drop it
-			_ = d.Reject(false)
+func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
+	deliveryInfo := DeliveryInfo{
+		Queue:      queueName,
+		Exchange:   delivery.Exchange,
+		RoutingKey: delivery.RoutingKey,
+		Headers:    Headers(delivery.Headers),
+	}
+	return deliveryInfo
+}
+
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue Queue) {
+	for delivery := range deliveries {
+		//startTime := time.Now()
+		deliveryInfo := getDeliveryInfo(queue.Name, delivery)
+		//EventReceived(c.queueName, deliveryInfo.RoutingKey)
+
+		// Establish which handler is invoked
+		handler, ok := queue.Handlers.Get(deliveryInfo.RoutingKey)
+		if !ok {
+			// TODO Handle missing handler?
+			_ = delivery.Reject(false)
+
+			//if c.options.defaultHandler == nil {
+			//	_ = delivery.Nack(false, false)
+			//	EventWithoutHandler(c.queueName, deliveryInfo.RoutingKey)
+			//	continue
+			//}
+			//handler = c.options.defaultHandler
 		}
+
+		uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
+		tracingCtx := extractToContext(delivery.Headers)
+		// TODO Handle response
+		if _, err := handler(tracingCtx, uevt); err != nil {
+			//	elapsed := time.Since(startTime).Milliseconds()
+			//	notifyEventHandlerFailed(c.options.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
+			_ = delivery.Nack(false, false)
+			//	EventNack(c.queueName, deliveryInfo.RoutingKey, elapsed)
+			continue
+		}
+
+		//elapsed := time.Since(startTime).Milliseconds()
+		//notifyEventHandlerSucceed(c.options.notificationCh, deliveryInfo.RoutingKey, elapsed)
+		_ = delivery.Ack(false)
+		//EventAck(c.queueName, deliveryInfo.RoutingKey, elapsed)
 	}
 }
 
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
-	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.eventType, &messageHandlerInvoker{
-		msgHandler: cfg.handler,
-		eventType:  cfg.eventType,
-	}); err != nil {
+	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.handler); err != nil {
 		return err
 	}
 
@@ -454,7 +445,7 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
 		serviceName:   serviceName,
 		amqpUri:       uri,
-		queueHandlers: &handlers.QueueHandlers[messageHandlerInvoker]{},
+		queueHandlers: &QueueHandlers{},
 		keyToType:     make(map[string]reflect.Type),
 		typeToKey:     make(map[reflect.Type]string),
 	}
@@ -466,7 +457,7 @@ func (c *Connection) setup() error {
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)
 		}
-		go c.divertToMessageHandlers(consumer, queue.Handlers)
+		go c.divertToMessageHandlers(consumer, queue)
 	}
 	return nil
 }
@@ -480,11 +471,6 @@ func getEventType(eventType any) (eventType, error) {
 
 type eventType reflect.Type
 
-type messageHandlerInvoker struct {
-	msgHandler HandlerFunc
-	eventType  eventType
-}
-
 // getSetupFuncName returns the name of the Setup function
 func getSetupFuncName(f Setup) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
@@ -497,8 +483,8 @@ func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
 
 // sendingService returns the name of the service that produced the message
 // Can be used to send a handlerResponse, see PublishServiceResponse
-func sendingService(headers Headers) (string, error) {
-	if h, exist := headers[headerService]; exist {
+func sendingService(di DeliveryInfo) (string, error) {
+	if h, exist := di.Headers[headerService]; exist {
 		switch v := h.(type) {
 		case string:
 			return v, nil

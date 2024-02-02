@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,12 +34,10 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	handlers2 "github.com/sparetimecoders/goamqp/internal/handlers"
 )
 
 func Test_AmqpVersion(t *testing.T) {
-	require.Equal(t, "_unknown_", amqpVersion())
+	require.Equal(t, "_unknown_", version())
 }
 
 func Test_getEventType(t *testing.T) {
