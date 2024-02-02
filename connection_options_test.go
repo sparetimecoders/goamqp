@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -77,13 +77,13 @@ func Test_EventStreamPublisher_Ok(t *testing.T) {
 	require.Equal(t, 0, len(channel.QueueDeclarations))
 	require.Equal(t, 0, len(channel.BindingDeclarations))
 
-	err = p.PublishWithContext(context.Background(), TestMessage{"test", true})
+	err = p.Publish(context.Background(), TestMessage{"test", true})
 	require.NoError(t, err)
 
 	published := <-channel.Published
 	require.Equal(t, "key", published.key)
 
-	err = p.PublishWithContext(context.Background(), TestMessage{Msg: "test"}, Header{"x-header", "header"})
+	err = p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"x-header", "header"})
 	require.NoError(t, err)
 	published = <-channel.Published
 
@@ -106,13 +106,13 @@ func Test_QueuePublisher_Ok(t *testing.T) {
 	require.Equal(t, 0, len(channel.QueueDeclarations))
 	require.Equal(t, 0, len(channel.BindingDeclarations))
 
-	err = p.PublishWithContext(context.Background(), TestMessage{"test", true})
+	err = p.Publish(context.Background(), TestMessage{"test", true})
 	require.NoError(t, err)
 
 	published := <-channel.Published
 	require.Equal(t, "key", published.key)
 
-	err = p.PublishWithContext(context.Background(), TestMessage{Msg: "test"}, Header{"x-header", "header"})
+	err = p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"x-header", "header"})
 	require.NoError(t, err)
 	published = <-channel.Published
 
@@ -147,7 +147,7 @@ func Test_UseMessageLogger(t *testing.T) {
 	)
 	require.NotNil(t, conn.messageLogger)
 
-	err := p.PublishWithContext(context.Background(), TestMessage{"test", true})
+	err := p.Publish(context.Background(), TestMessage{"test", true})
 	require.NoError(t, err)
 	<-channel.Published
 
@@ -336,7 +336,7 @@ func Test_ServicePublisher_Ok(t *testing.T) {
 	require.Equal(t, 0, len(channel.QueueDeclarations))
 	require.Equal(t, 0, len(channel.BindingDeclarations))
 
-	err = p.PublishWithContext(context.Background(), TestMessage{"test", true})
+	err = p.Publish(context.Background(), TestMessage{"test", true})
 	require.NoError(t, err)
 	published := <-channel.Published
 	require.Equal(t, "key", published.key)
@@ -359,11 +359,11 @@ func Test_ServicePublisher_Multiple(t *testing.T) {
 	require.Equal(t, 0, len(channel.QueueDeclarations))
 	require.Equal(t, 0, len(channel.BindingDeclarations))
 
-	err = p.PublishWithContext(context.Background(), TestMessage{"test", true})
+	err = p.Publish(context.Background(), TestMessage{"test", true})
 	require.NoError(t, err)
-	err = p.PublishWithContext(context.Background(), TestMessage2{Msg: "msg"})
+	err = p.Publish(context.Background(), TestMessage2{Msg: "msg"})
 	require.NoError(t, err)
-	err = p.PublishWithContext(context.Background(), TestMessage{"test2", false})
+	err = p.Publish(context.Background(), TestMessage{"test2", false})
 	require.NoError(t, err)
 	published := <-channel.Published
 	require.Equal(t, "key", published.key)
@@ -390,7 +390,7 @@ func Test_ServicePublisher_NoMatchingRoute(t *testing.T) {
 	require.Equal(t, 0, len(channel.QueueDeclarations))
 	require.Equal(t, 0, len(channel.BindingDeclarations))
 
-	err = p.PublishWithContext(context.Background(), &TestMessage{Msg: "test"})
+	err = p.Publish(context.Background(), &TestMessage{Msg: "test"})
 	require.True(t, errors.Is(err, ErrNoRouteForMessageType))
 	require.EqualError(t, err, "no routingkey configured for message of type *goamqp.TestMessage")
 }
