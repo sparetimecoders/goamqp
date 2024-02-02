@@ -134,52 +134,6 @@ func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	require.EqualError(t, err, "failed to declare exchange events.topic.exchange: failed to create exchange")
 }
 
-func Test_UseMessageLogger(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	conn.typeToKey[reflect.TypeOf(TestMessage{})] = "routingkey"
-	logger := &MockLogger{}
-	p := NewPublisher()
-
-	_ = conn.Start(context.Background(),
-		UseMessageLogger(logger.logger()),
-		ServicePublisher("service", p),
-	)
-	require.NotNil(t, conn.messageLogger)
-
-	err := p.PublishWithContext(context.Background(), TestMessage{"test", true})
-	require.NoError(t, err)
-	<-channel.Published
-
-	require.Equal(t, true, logger.outgoing)
-	require.Equal(t, "routingkey", logger.routingKey)
-	require.Equal(t, reflect.TypeOf(TestMessage{}), logger.eventType)
-}
-
-func Test_UseMessageLogger_Nil(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	p := NewPublisher()
-
-	err := conn.Start(context.Background(),
-		UseMessageLogger(nil),
-		ServicePublisher("service", p),
-	)
-	require.Error(t, err)
-}
-
-func Test_UseMessageLogger_Default(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	p := NewPublisher()
-
-	err := conn.Start(context.Background(),
-		ServicePublisher("service", p),
-	)
-	require.NoError(t, err)
-	require.NotNil(t, conn.messageLogger)
-}
-
 func Test_EventStreamConsumer(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)

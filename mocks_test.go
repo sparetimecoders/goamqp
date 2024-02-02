@@ -25,7 +25,6 @@ package goamqp
 import (
 	"context"
 	"errors"
-	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -254,7 +253,6 @@ func mockConnection(channel *MockAmqpChannel) *Connection {
 	c := newConnection("svc", amqp.URI{})
 	c.channel = channel
 	c.connection = &MockAmqpConnection{}
-	c.messageLogger = noOpMessageLogger()
 	return c
 }
 
@@ -265,20 +263,4 @@ func (r badRand) Read(buf []byte) (int, error) {
 		buf[i] = byte(i)
 	}
 	return len(buf), nil
-}
-
-type MockLogger struct {
-	jsonContent []byte
-	eventType   reflect.Type
-	routingKey  string
-	outgoing    bool
-}
-
-func (m *MockLogger) logger() MessageLogger {
-	return func(jsonContent []byte, eventType reflect.Type, routingKey string, outgoing bool) {
-		m.jsonContent = jsonContent
-		m.eventType = eventType
-		m.routingKey = routingKey
-		m.outgoing = outgoing
-	}
 }

@@ -52,12 +52,12 @@ type Connection struct {
 	connection    amqpConnection
 	channel       AmqpChannel
 	queueHandlers *handlers.QueueHandlers[messageHandlerInvoker]
-	// messageLogger defaults to noOpMessageLogger, can be overridden with UseMessageLogger
-	messageLogger MessageLogger
 	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
-	errorLog  errorLog
-	typeToKey map[reflect.Type]string
-	keyToType map[string]reflect.Type
+	errorLog               errorLog
+	typeToKey              map[reflect.Type]string
+	keyToType              map[string]reflect.Type
+	preHandleMessageFuncs  []PreHandleMessageFunc
+	prePublishMessageFuncs []PrePublishMessageFunc
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
@@ -135,7 +135,6 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {
 		return ErrAlreadyStarted
 	}
-	c.messageLogger = noOpMessageLogger()
 	c.errorLog = noOpLogger
 	if c.channel == nil {
 		err := c.connectToAmqpURL()
@@ -196,8 +195,6 @@ type AmqpChannel interface {
 	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
-	// Deprecated: Use PublishWithContext instead.
-	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
 	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
@@ -252,8 +249,6 @@ func responseWrapper(handler HandlerFunc, routingKey string, publisher ServiceRe
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to extract service name")
 			}
-			// TODO Pass context to HandlerFunc instead and use here?
-			ctx := context.Background()
 			err = publisher(ctx, service, routingKey, resp)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to publish response")
@@ -347,8 +342,14 @@ func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind
 	)
 }
 
-func (c *Connection) addHandler(queueName, routingKey string, eventType eventType, mHI *messageHandlerInvoker) error {
+func (c *Connection) addHandler(queueName, routingKey string, mHI *messageHandlerInvoker) error {
 	return c.queueHandlers.Add(queueName, routingKey, mHI)
+}
+
+func (c *Connection) handleMessage2(ctx context.Context, queueName string, msgHandler *messageHandlerInvoker, delivery amqp.Delivery) {
+	c.preHandleMessage(ctx, queueName, msgHandler.eventType, delivery)
+	c.handleMessage(ctx, delivery, msgHandler.msgHandler, msgHandler.eventType)
+	// c.postHandleMessage(ctx, queueName, d)
 }
 
 func (c *Connection) handleMessage(ctx context.Context, d amqp.Delivery, handler HandlerFunc, eventType eventType) {
@@ -380,7 +381,6 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 	if err != nil {
 		return err
 	}
-	c.messageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
 
 	publishing := amqp.Publishing{
 		Body:         jsonBytes,
@@ -388,6 +388,7 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 		DeliveryMode: 2,
 		Headers:      headers,
 	}
+	c.prePublishMessage(ctx, routingKey, reflect.TypeOf(msg), publishing)
 
 	return c.channel.PublishWithContext(ctx, exchangeName,
 		routingKey,
@@ -397,13 +398,10 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 	)
 }
 
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers *handlers.Handlers[messageHandlerInvoker]) {
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queueHandlers handlers.Queue[messageHandlerInvoker]) {
 	for d := range deliveries {
-		if h, ok := handlers.Get(d.RoutingKey); ok {
-			// TODO More here..
-			ctx := context.Background()
-			c.messageLogger(d.Body, h.eventType, d.RoutingKey, false)
-			c.handleMessage(ctx, d, h.msgHandler, h.eventType)
+		if h, ok := queueHandlers.Handlers.Get(d.RoutingKey); ok {
+			c.handleMessage2(context.Background(), queueHandlers.Name, h, d)
 		} else {
 			// Unhandled message, drop it
 			_ = d.Reject(false)
@@ -412,7 +410,7 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, ha
 }
 
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
-	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.eventType, &messageHandlerInvoker{
+	if err := c.addHandler(cfg.queueName, cfg.routingKey, &messageHandlerInvoker{
 		msgHandler: cfg.handler,
 		eventType:  cfg.eventType,
 	}); err != nil {
@@ -464,9 +462,22 @@ func (c *Connection) setup() error {
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)
 		}
-		go c.divertToMessageHandlers(consumer, queue.Handlers)
+		go c.divertToMessageHandlers(consumer, queue)
 	}
 	return nil
+}
+
+func (c *Connection) preHandleMessage(ctx context.Context, queueName string, eventType reflect.Type, delivery amqp.Delivery) {
+	for _, f := range c.preHandleMessageFuncs {
+		f(ctx, queueName, eventType, delivery)
+	}
+}
+
+func (c *Connection) prePublishMessage(ctx context.Context, routingKey string, eventType reflect.Type, publishing amqp.Publishing) {
+	for _, f := range c.prePublishMessageFuncs {
+		f(ctx, routingKey, eventType, publishing)
+	}
+	// TODO c.messageLogger(publishing.Body, eventType, routingKey, true)
 }
 
 func getEventType(eventType any) (eventType, error) {

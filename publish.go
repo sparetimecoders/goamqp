@@ -45,12 +45,6 @@ func NewPublisher() *Publisher {
 	return &Publisher{}
 }
 
-// Publish publishes a message to a given exchange
-// Deprecated: Use PublishWithContext instead.
-func (p *Publisher) Publish(msg any, headers ...Header) error {
-	return p.PublishWithContext(context.Background(), msg, headers...)
-}
-
 func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...Header) error {
 	table := amqp.Table{}
 	for _, v := range p.defaultHeaders {

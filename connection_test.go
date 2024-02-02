@@ -293,8 +293,7 @@ func Test_Publish(t *testing.T) {
 	headers := amqp.Table{}
 	headers["key"] = "value"
 	c := Connection{
-		channel:       channel,
-		messageLogger: noOpMessageLogger(),
+		channel: channel,
 	}
 	err := c.publishMessage(context.Background(), Message{true}, "key", "exchange", headers)
 	require.NoError(t, err)
@@ -329,8 +328,7 @@ func Test_Publish_Marshal_Error(t *testing.T) {
 	headers := amqp.Table{}
 	headers["key"] = "value"
 	c := Connection{
-		channel:       channel,
-		messageLogger: noOpMessageLogger(),
+		channel: channel,
 	}
 	err := c.publishMessage(context.Background(), math.Inf(1), "key", "exchange", headers)
 	require.EqualError(t, err, "json: unsupported value: +Inf")
@@ -435,12 +433,11 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	close(queueDeliveries)
 
 	c := Connection{
-		started:       true,
-		channel:       &channel,
-		messageLogger: noOpMessageLogger(),
-		errorLog:      noOpLogger,
+		started:  true,
+		channel:  &channel,
+		errorLog: noOpLogger,
 	}
-	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0].Handlers)
+	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0])
 
 	require.Equal(t, 1, len(acker.Rejects))
 	require.Equal(t, 1, len(acker.Nacks))
@@ -497,8 +494,7 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 		Acknowledger: &acker,
 	}
 	c := &Connection{
-		messageLogger: noOpMessageLogger(),
-		errorLog:      noOpLogger,
+		errorLog: noOpLogger,
 	}
 	c.handleMessage(context.Background(), delivery, func(ctx context.Context, i any, headers Headers) (any, error) {
 		if handle {

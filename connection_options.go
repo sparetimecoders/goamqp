@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -33,6 +34,26 @@ import (
 // Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
+
+type PreHandleMessageFunc func(ctx context.Context, queueName string, eventType reflect.Type, delivery amqp.Delivery)
+
+// WithPreHandleMessageFuncs adds functions that will be called after receiving the message from rabbitmq
+func WithPreHandleMessageFuncs(preFuncs []PreHandleMessageFunc) Setup {
+	return func(conn *Connection) error {
+		conn.preHandleMessageFuncs = append(conn.preHandleMessageFuncs, preFuncs...)
+		return nil
+	}
+}
+
+type PrePublishMessageFunc func(ctx context.Context, routingKey string, eventType reflect.Type, publishing amqp.Publishing)
+
+// WithPrePublishMessageFuncs adds functions that will be called before publishing the message from rabbitmq
+func WithPrePublishMessageFuncs(preFuncs []PrePublishMessageFunc) Setup {
+	return func(conn *Connection) error {
+		conn.prePublishMessageFuncs = append(conn.prePublishMessageFuncs, preFuncs...)
+		return nil
+	}
+}
 
 // WithTypeMapping adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
 func WithTypeMapping(routingKey string, msgType any) Setup {
@@ -73,17 +94,6 @@ func UseLogger(logger errorLog) Setup {
 			return ErrNilLogger
 		}
 		c.errorLog = logger
-		return nil
-	}
-}
-
-// UseMessageLogger allows a MessageLogger to be used when log in/outgoing messages
-func UseMessageLogger(logger MessageLogger) Setup {
-	return func(c *Connection) error {
-		if logger == nil {
-			return ErrNilLogger
-		}
-		c.messageLogger = logger
 		return nil
 	}
 }
@@ -133,7 +143,7 @@ func TransientStreamConsumer(exchange, routingKey string, handler HandlerFunc, e
 			return err
 		}
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
-		if err := c.addHandler(queueName, routingKey, eventTyp, &messageHandlerInvoker{
+		if err := c.addHandler(queueName, routingKey, &messageHandlerInvoker{
 			msgHandler: handler,
 			eventType:  eventTyp,
 		}); err != nil {
