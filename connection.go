@@ -292,12 +292,18 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 		DeliveryMode: 2,
 		Headers:      injectToHeaders(ctx, headers),
 	}
-	return c.channel.PublishWithContext(ctx, exchangeName,
+	err = c.channel.PublishWithContext(ctx, exchangeName,
 		routingKey,
 		false,
 		false,
 		publishing,
 	)
+	if err != nil {
+		EventPublishFailed(exchangeName, routingKey)
+		return err
+	}
+	EventPublishSucceed(exchangeName, routingKey)
+	return nil
 }
 
 func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
