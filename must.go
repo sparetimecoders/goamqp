@@ -22,14 +22,13 @@
 
 package goamqp
 
-type Notification struct {
-	Message string
-	// Type    NotificationType
-	// Source  NotificationSource
-}
-
-func notifyEventHandlerSucceed(ch chan<- Notification, routingKey string, took int64) {
-}
-
-func notifyEventHandlerFailed(ch chan<- Notification, routingKey string, took int64, err error) {
+// Must is a helper that wraps a call to a function returning (*T, error)
+// and panics if the error is non-nil. It is intended for use in variable
+// initializations such as
+// var c = goamqp.Must(goamqp.NewFromURL("service", "amqp://"))
+func Must[T any](t *T, err error) *T {
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

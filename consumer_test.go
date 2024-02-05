@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2024 sparetimecoders
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 package goamqp
 
 import (
@@ -10,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_Setups(t *testing.T) {
+func Test_Consumer_Setups(t *testing.T) {
 	// Needed for transient stream tests
 	uuid.SetRand(badRand{})
 
@@ -22,7 +44,7 @@ func Test_Setups(t *testing.T) {
 		expectedQueues    []QueueDeclaration
 		expectedBindings  []BindingDeclaration
 		expectedConsumer  []Consumer
-		expectedHandler   *QueueHandlers
+		expectedHandler   *queueHandlers
 	}{
 		{
 			name: "EventStreamConsumer",
@@ -73,7 +95,7 @@ func Test_Setups(t *testing.T) {
 			expectedQueues:    []QueueDeclaration{{name: "targetService.headers.exchange.response.queue.svc", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}},
 			expectedBindings:  []BindingDeclaration{{queue: "targetService.headers.exchange.response.queue.svc", noWait: false, exchange: "targetService.headers.exchange.response", key: "key", args: amqp.Table{headerService: "svc"}}},
 			expectedConsumer:  []Consumer{{queue: "targetService.headers.exchange.response.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
-			expectedHandler: &QueueHandlers{"targetService.headers.exchange.response.queue.svc": &Handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
+			expectedHandler: &queueHandlers{"targetService.headers.exchange.response.queue.svc": &handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
 				return nil
 			}}},
 		},
@@ -86,7 +108,7 @@ func Test_Setups(t *testing.T) {
 			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: amqp.Table{}}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}},
 			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
-			expectedHandler: &QueueHandlers{"events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f": &Handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
+			expectedHandler: &queueHandlers{"events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f": &handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
 				return nil
 			}}},
 		},
