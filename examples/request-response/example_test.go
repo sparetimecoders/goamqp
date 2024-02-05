@@ -76,9 +76,9 @@ func handleRequest(ctx context.Context, m ConsumableEvent[Request]) (any, error)
 	return response, nil
 }
 
-func handleResponse(ctx context.Context, m ConsumableEvent[Response]) (any, error) {
+func handleResponse(ctx context.Context, m ConsumableEvent[Response]) error {
 	fmt.Printf("Got response, %v\n", m.Payload.Data)
-	return nil, nil
+	return nil
 }
 
 type Request struct {

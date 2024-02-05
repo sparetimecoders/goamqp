@@ -162,25 +162,6 @@ func (c *Connection) Close() error {
 	return c.connection.Close()
 }
 
-func (c *Connection) TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
-	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) (any, error) {
-		routingKey := event.DeliveryInfo.RoutingKey
-		typ, exists := c.keyToType[routingKey]
-		if !exists {
-			return nil, nil
-		}
-		message := reflect.New(typ).Interface()
-		if err := json.Unmarshal(event.Payload, &message); err != nil {
-			return nil, err
-		}
-		if resp, err := handler(ctx, message); err == nil {
-			return resp, nil
-		} else {
-			return nil, err
-		}
-	}
-}
-
 // AmqpChannel wraps the amqp.Channel to allow for mocking
 type AmqpChannel interface {
 	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
@@ -229,25 +210,22 @@ func version() string {
 	return "_unknown_"
 }
 
-func responseWrapper[T, R any](handler EventHandler[T], routingKey string, publisher ServiceResponsePublisher[R]) EventHandler[T] {
-	return func(ctx context.Context, event ConsumableEvent[T]) (response any, err error) {
+func responseWrapper[T, R any](handler RequestResponseEventHandler[T, R], routingKey string, publisher ServiceResponsePublisher[R]) EventHandler[T] {
+	return func(ctx context.Context, event ConsumableEvent[T]) (err error) {
 		resp, err := handler(ctx, event)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to process message")
+			return errors.Wrap(err, "failed to process message")
 		}
-		if resp != nil {
-			service, err := sendingService(event.DeliveryInfo)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to extract service name")
-			}
-			// TODO Handle response with type R
-			err = publisher(ctx, service, routingKey, resp.(R))
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to publish response")
-			}
-			return resp, nil
+		service, err := sendingService(event.DeliveryInfo)
+		if err != nil {
+			return errors.Wrap(err, "failed to extract service name")
 		}
-		return nil, nil
+		// TODO Handle response with type R
+		err = publisher(ctx, service, routingKey, resp)
+		if err != nil {
+			return errors.Wrapf(err, "failed to publish response")
+		}
+		return nil
 	}
 }
 
@@ -370,14 +348,14 @@ func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
 	return deliveryInfo
 }
 
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue Queue) {
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue QueueWithHandlers) {
 	for delivery := range deliveries {
 		startTime := time.Now()
 		deliveryInfo := getDeliveryInfo(queue.Name, delivery)
 		EventReceived(queue.Name, deliveryInfo.RoutingKey)
 
 		// Establish which handler is invoked
-		handler, ok := queue.Handlers.Get(deliveryInfo.RoutingKey)
+		handler, ok := queue.Handlers.get(deliveryInfo.RoutingKey)
 		if !ok {
 			_ = delivery.Reject(false)
 			EventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
@@ -387,7 +365,7 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, qu
 		uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
 		tracingCtx := extractToContext(delivery.Headers)
 		// TODO Handle response
-		if _, err := handler(tracingCtx, uevt); err != nil {
+		if err := handler(tracingCtx, uevt); err != nil {
 			elapsed := time.Since(startTime).Milliseconds()
 			notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
 			if errors.Is(err, ErrParseJSON) {
@@ -454,6 +432,7 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 
 func (c *Connection) setup() error {
 	for _, queue := range c.queueHandlers.Queues() {
+		// TODO one channel per queue`
 		consumer, err := consume(c.channel, queue.Name)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)

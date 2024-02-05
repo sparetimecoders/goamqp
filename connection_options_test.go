@@ -124,8 +124,8 @@ func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 func Test_EventStreamConsumer(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}))
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -144,8 +144,8 @@ func Test_EventStreamConsumer(t *testing.T) {
 func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}, AddQueueNameSuffix("suffix")))
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
@@ -164,8 +164,8 @@ func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}, AddQueueNameSuffix("")))
 	require.ErrorContains(t, err, "failed, empty queue suffix not allowed")
 }
@@ -173,8 +173,8 @@ func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 func Test_ServiceRequestConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}))
 
 	require.NoError(t, err)
@@ -197,8 +197,8 @@ func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 	declareError := errors.New("failed")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}))
 
 	require.ErrorContains(t, err, "failed, failed to create exchange svc.headers.exchange.response: failed")
@@ -207,8 +207,8 @@ func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 func Test_ServiceResponseConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}))
 
 	require.NoError(t, err)
@@ -230,8 +230,8 @@ func Test_ServiceResponseConsumer_ExchangeDeclareError(t *testing.T) {
 	declareError := errors.New("actual error message")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, nil
+	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return nil
 	}))
 
 	require.ErrorContains(t, err, " failed, actual error message")
@@ -257,7 +257,7 @@ func Test_RequestResponseHandler(t *testing.T) {
 
 	require.Equal(t, 1, len(conn.queueHandlers.Queues()))
 
-	handler, _ := conn.queueHandlers.Handlers("svc.direct.exchange.request.queue").Get("key")
+	handler, _ := conn.queueHandlers.Handlers("svc.direct.exchange.request.queue").get("key")
 	require.Equal(t, "github.com/sparetimecoders/goamqp.responseWrapper.func1", runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name())
 }
 
@@ -352,8 +352,8 @@ func Test_TransientEventStreamConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, errors.New("failed")
+	err := TransientEventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return errors.New("failed")
 	})(conn)
 
 	require.NoError(t, err)
@@ -367,7 +367,7 @@ func Test_TransientEventStreamConsumer_Ok(t *testing.T) {
 	require.Equal(t, QueueDeclaration{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, exclusive: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
 
 	require.Equal(t, 1, len(conn.queueHandlers.Queues()))
-	handler, ok := conn.queueHandlers.Handlers("events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f").Get("key")
+	handler, ok := conn.queueHandlers.Handlers("events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f").get("key")
 	require.True(t, ok)
 	require.NotNil(t, handler)
 }
@@ -378,8 +378,8 @@ func Test_TransientEventStreamConsumer_HandlerForRoutingKeyAlreadyExists(t *test
 	require.NoError(t, conn.queueHandlers.Add("events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", "root.key", nil))
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("root.#", func(ctx context.Context, msg ConsumableEvent[TestMessage]) (any, error) {
-		return nil, errors.New("failed")
+	err := TransientEventStreamConsumer("root.#", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
+		return errors.New("failed")
 	})(conn)
 
 	require.EqualError(t, err, "routingkey root.# overlaps root.key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f, consider using AddQueueNameSuffix")
@@ -404,8 +404,8 @@ func testTransientEventStreamConsumerFailure(t *testing.T, channel *MockAmqpChan
 	conn := mockConnection(channel)
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[Message]) (any, error) {
-		return nil, errors.New("failed")
+	err := TransientEventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[Message]) error {
+		return errors.New("failed")
 	})(conn)
 
 	require.EqualError(t, err, expectedError)
