@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 // MIT License
 //
 // Copyright (c) 2024 sparetimecoders
@@ -20,7 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package integration
+package _integration
 
 import (
 	"context"
@@ -33,6 +36,7 @@ import (
 	. "github.com/sparetimecoders/goamqp"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 )
 
 var (
@@ -49,15 +53,16 @@ func (suite *IntegrationTestSuite) SetupTest() {
 	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
 		amqpURL = urlFromEnv
 	}
-	suite.admin = ParseAmqpURL(amqpURL)
-	require.NotNil(suite.T(), suite.admin)
-	err := suite.admin.CreateVHost()
+	var err error
+	suite.admin, err = FromURL(amqpURL)
 	require.NoError(suite.T(), err)
+	require.NotNil(suite.T(), suite.admin)
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
-	err := suite.admin.DeleteVHost()
+	err := suite.admin.close()
 	require.NoError(suite.T(), err)
+	defer goleak.VerifyNone(suite.T())
 }
 
 func TestIntegration(t *testing.T) {
@@ -260,7 +265,6 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	err := publish.Publish(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
-	go forceClose(closer, 3)
 	<-closer
 	<-closer
 	require.Equal(suite.T(), Incoming{Query: clientQuery}, client1Received)
@@ -369,7 +373,6 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	err = publish.Publish(context.Background(), &IncomingResponse{Value: clientQuery})
 	require.NoError(suite.T(), err)
 
-	go forceClose(closer, 3)
 	<-closer
 	<-closer
 	require.Equal(suite.T(), Incoming{Query: clientQuery}, received[0])
@@ -495,7 +498,6 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	err = publish.Publish(context.Background(), &IncomingResponse{Value: clientQuery})
 	require.NoError(suite.T(), err)
 
-	go forceClose(closer, 3)
 	<-closer
 	<-closer
 	<-closer
@@ -577,9 +579,4 @@ func createConnection(suite *IntegrationTestSuite, serviceName string, opts ...S
 	err = conn.Start(context.Background(), opts...)
 	require.NoError(suite.T(), err)
 	return conn
-}
-
-func forceClose(closer chan bool, seconds int64) {
-	time.Sleep(time.Duration(seconds) * time.Second)
-	closer <- true
 }

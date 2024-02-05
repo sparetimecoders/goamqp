@@ -1,4 +1,7 @@
-package integration
+//go:build integration
+// +build integration
+
+package _integration
 
 type Incoming struct {
 	Query string

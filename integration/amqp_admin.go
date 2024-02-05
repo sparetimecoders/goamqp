@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 // MIT License
 //
 // Copyright (c) 2024 sparetimecoders
@@ -20,13 +23,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package integration
+package _integration
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -45,25 +47,31 @@ type amqpAdmin struct {
 	Port         int
 }
 
-func ParseAmqpURL(amqpURL string) *amqpAdmin {
-	amqpConnectionRegex := regexp.MustCompile(`(?:amqp:\/\/)?(?P<Username>.*):(?P<Password>.*?)@(?P<Host>.*?)(?:\:(?P<Port>\d*))?(?:\/(?P<VHost>.*))?$`)
+func FromURL(amqpURL string) (*amqpAdmin, error) {
+	amqpConnectionRegex := regexp.MustCompile(`(?:amqp://)?(?P<Username>.*):(?P<Password>.*?)@(?P<Host>.*?)(?:\:(?P<Port>\d*))?(?:/(?P<VHost>.*))?$`)
 	if amqpConnectionRegex.MatchString(amqpURL) {
 		a := convertToAmqpConfig(mapValues(amqpConnectionRegex, amqpConnectionRegex.FindStringSubmatch(amqpURL)))
 		a.httpClient = &http.Client{}
 		a.amqpAdminURL = fmt.Sprintf("http://%s:%d/api", a.Host, 15672)
 		a.VHost = uuid.New().String()
-		return a
+		return a, a.createVHost()
 	}
-	log.Panicf("invalid Amqp URL: %s", amqpURL)
-	return nil
+
+	return nil, fmt.Errorf("invalid Amqp URL: %s", amqpURL)
 }
 
-func (a *amqpAdmin) CreateVHost() error {
+func (a *amqpAdmin) close() error {
+	err := a.deleteVHost()
+	a.httpClient.CloseIdleConnections()
+	return err
+}
+
+func (a *amqpAdmin) createVHost() error {
 	_, err := a.request(http.MethodPut, fmt.Sprintf("/vhosts/%s", a.VHost), nil)
 	return err
 }
 
-func (a *amqpAdmin) DeleteVHost() error {
+func (a *amqpAdmin) deleteVHost() error {
 	_, err := a.request(http.MethodDelete, fmt.Sprintf("/vhosts/%s", a.VHost), nil)
 	return err
 }
@@ -84,6 +92,7 @@ func (a *amqpAdmin) GetExchanges(filterDefaults bool) ([]Exchange, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 	var exchanges []Exchange
 	err = json.NewDecoder(resp.Body).Decode(&exchanges)
 	if filterDefaults {
@@ -114,6 +123,7 @@ func (a *amqpAdmin) GetQueues() ([]Queue, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 	var queues []Queue
 	err = json.NewDecoder(resp.Body).Decode(&queues)
 	return queues, err
@@ -124,6 +134,7 @@ func (a *amqpAdmin) GetBindings(queueName string, filterDefault bool) ([]Binding
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 	var bindings []Binding
 	err = json.NewDecoder(resp.Body).Decode(&bindings)
 	if filterDefault {

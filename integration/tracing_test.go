@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 // MIT License
 //
 // Copyright (c) 2024 sparetimecoders
@@ -21,7 +24,7 @@
 // SOFTWARE.
 // MIT License
 
-package integration
+package _integration
 
 import (
 	"context"
@@ -58,8 +61,6 @@ func (suite *IntegrationTestSuite) Test_Tracing() {
 	require.NoError(suite.T(), err)
 	<-closer
 
-	require.Equal(suite.T(), trace.SpanFromContext(publishingContext).SpanContext().TraceID(), actualTraceID)
 	require.NoError(suite.T(), server.Close())
-	// TODO stop consumer go processes
-	// goleak.VerifyNone(suite.T())
+	require.Equal(suite.T(), trace.SpanFromContext(publishingContext).SpanContext().TraceID(), actualTraceID)
 }
