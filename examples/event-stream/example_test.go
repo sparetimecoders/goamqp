@@ -84,6 +84,7 @@ func (s *StatService) Start(ctx context.Context) error {
 }
 
 func (s *StatService) handleOrderUpdated(ctx context.Context, msg goamqp.ConsumableEvent[OrderUpdated]) error {
+	// Just to make sure the Output is correct in the example...
 	fmt.Printf("Updated order id, %s - %s\n", msg.Payload.Id, msg.Payload.Data)
 	return nil
 }
