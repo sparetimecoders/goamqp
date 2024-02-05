@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package _integration
+package integration
 
 import (
 	"context"
@@ -30,19 +30,12 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/sparetimecoders/goamqp"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-
-	. "github.com/sparetimecoders/goamqp"
 )
 
 var (
-	// amqpUser          = "user"
-	// amqpPasswod       = "password"
-	// amqpHost          = "localhost"
-	// amqpPort          = 5672
-	// amqpAdminPort     = 15672
-	// amqpURL           = fmt.Sprintf("amqp://%s:%s@%s:%d", amqpUser, amqpPasswod, amqpHost, amqpPort)
 	serverServiceName = "server"
 	amqpURL           = "amqp://user:password@localhost:5672/test"
 )
@@ -524,6 +517,7 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 
 	// Verify queues and bindings
 	queuesBeforeClose, err := suite.admin.GetQueues()
+	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), 1, len(queuesBeforeClose))
 	q := queuesBeforeClose[0]
 	bindings, err := suite.admin.GetBindings(q.Name, true)
@@ -588,16 +582,4 @@ func createConnection(suite *IntegrationTestSuite, serviceName string, opts ...S
 func forceClose(closer chan bool, seconds int64) {
 	time.Sleep(time.Duration(seconds) * time.Second)
 	closer <- true
-}
-
-type Incoming struct {
-	Query string
-}
-
-type Test struct {
-	Test string
-}
-
-type IncomingResponse struct {
-	Value string
 }
