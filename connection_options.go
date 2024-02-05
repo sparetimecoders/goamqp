@@ -66,22 +66,6 @@ func WithHandler[T any](routingKey string, handler EventHandler[T]) Setup {
 	}
 }
 
-// CloseListener receives a callback when the AMQP Channel gets closed
-func CloseListener(e chan error) Setup {
-	return func(c *Connection) error {
-		temp := make(chan *amqp.Error)
-		go func() {
-			for {
-				if ev := <-temp; ev != nil {
-					e <- errors.New(ev.Error())
-				}
-			}
-		}()
-		c.channel.NotifyClose(temp)
-		return nil
-	}
-}
-
 // WithPrefetchLimit configures the number of messages to prefetch from the server.
 // To get round-robin behavior between consumers consuming from the same queue on
 // different connections, set the prefetch count to 1, and the next available
@@ -95,6 +79,32 @@ func CloseListener(e chan error) Setup {
 func WithPrefetchLimit(limit int) Setup {
 	return func(conn *Connection) error {
 		return conn.channel.Qos(limit, 0, true)
+	}
+}
+
+// WithNotificationChannel specifies a go channel to receive messages
+// such as connection established, reconnecting, event published, consumed, etc.
+func WithNotificationChannel(notificationCh chan<- Notification) Setup {
+	return func(conn *Connection) error {
+		conn.notificationCh = notificationCh
+		return nil
+	}
+}
+
+// TODO REMOVE and use WithNotificationChannel instead?
+// CloseListener receives a callback when the AMQP Channel gets closed
+func CloseListener(e chan error) Setup {
+	return func(c *Connection) error {
+		temp := make(chan *amqp.Error)
+		go func() {
+			for {
+				if ev := <-temp; ev != nil {
+					e <- errors.New(ev.Error())
+				}
+			}
+		}()
+		c.channel.NotifyClose(temp)
+		return nil
 	}
 }
 
@@ -193,7 +203,7 @@ func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 
 // ServiceResponseConsumer is a specialization of EventStreamConsumer
 // It sets up ap a durable, persistent consumer (exchange->queue) for responses from targetService
-func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T], eventType any) Setup {
+func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T]) Setup {
 	return func(c *Connection) error {
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,

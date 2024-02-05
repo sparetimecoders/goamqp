@@ -25,6 +25,7 @@ package goamqp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -125,11 +126,13 @@ func newWrappedHandler[T any](handler EventHandler[T]) wrappedHandler {
 		}
 		err := json.Unmarshal(event.Payload, &consumableEvent.Payload)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%v: %w", err, ErrParseJSON)
 		}
 		return handler(ctx, consumableEvent)
 	}
 }
+
+var ErrParseJSON = errors.New("failed to parse")
 
 // overlaps checks if two AMQP binding patterns overlap
 func overlaps(p1, p2 string) bool {

@@ -48,7 +48,7 @@ func Example_request_response() {
 	err = clientConnection.Start(ctx,
 		WithTypeMapping(routingKey, Request{}),
 		ServicePublisher("service", publisher),
-		ServiceResponseConsumer("service", routingKey, handleResponse, Response{}),
+		ServiceResponseConsumer("service", routingKey, handleResponse),
 	)
 	checkError(err)
 
@@ -60,8 +60,8 @@ func Example_request_response() {
 	_ = clientConnection.Close()
 
 	// Output:
-	//Called process with test, returning response {test}
-	//Got response, test
+	// Called process with test, returning response {test}
+	// Got response, test
 }
 
 func checkError(err error) {

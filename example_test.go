@@ -40,11 +40,11 @@ func Example() {
 	connection := Must(NewFromURL("service", amqpURL))
 	err := connection.Start(ctx,
 		WithTypeMapping("key", IncomingMessage{}),
-		EventStreamConsumer("key", process, IncomingMessage{}),
+		EventStreamConsumer("key", process),
 		EventStreamPublisher(publisher),
 	)
 	checkError(err)
-	err = publisher.PublishWithContext(ctx, IncomingMessage{"OK"})
+	err = publisher.Publish(ctx, IncomingMessage{"OK"})
 	checkError(err)
 	time.Sleep(time.Second)
 	err = connection.Close()
@@ -58,8 +58,8 @@ func checkError(err error) {
 	}
 }
 
-func process(m any, headers Headers) (any, error) {
-	fmt.Printf("Called process with %v\n", m.(*IncomingMessage).Data)
+func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) (any, error) {
+	fmt.Printf("Called process with %v\n", m.Payload.Data)
 	return nil, nil
 }
 

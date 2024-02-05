@@ -97,12 +97,12 @@ func Test_Start_SetupFails(t *testing.T) {
 		serviceName:   "test",
 		connection:    mockAmqpConnection,
 		channel:       mockChannel,
-		queueHandlers: &handlers2.QueueHandlers[messageHandlerInvoker]{},
+		queueHandlers: &QueueHandlers{},
 	}
 	err := conn.Start(context.Background(),
-		EventStreamConsumer("test", func(i any, headers Headers) (any, error) {
+		EventStreamConsumer("test", func(ctx context.Context, msg ConsumableEvent[Message]) (any, error) {
 			return nil, errors.New("failed")
-		}, Message{}))
+		}))
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to create consumer for queue events.topic.exchange.queue.test. error consuming queue")
 }
@@ -291,8 +291,7 @@ func Test_Publish(t *testing.T) {
 	headers := amqp.Table{}
 	headers["key"] = "value"
 	c := Connection{
-		channel:       channel,
-		messageLogger: noOpMessageLogger(),
+		channel: channel,
 	}
 	err := c.publishMessage(context.Background(), Message{true}, "key", "exchange", headers)
 	require.NoError(t, err)
@@ -327,8 +326,7 @@ func Test_Publish_Marshal_Error(t *testing.T) {
 	headers := amqp.Table{}
 	headers["key"] = "value"
 	c := Connection{
-		channel:       channel,
-		messageLogger: noOpMessageLogger(),
+		channel: channel,
 	}
 	err := c.publishMessage(context.Background(), math.Inf(1), "key", "exchange", headers)
 	require.EqualError(t, err, "json: unsupported value: +Inf")
@@ -390,9 +388,11 @@ func TestResponseWrapper(t *testing.T) {
 			if tt.headers != nil {
 				headers = *tt.headers
 			}
-			resp, err := responseWrapper(func(i any, headers Headers) (any, error) {
+			resp, err := responseWrapper(func(ctx context.Context, msg ConsumableEvent[Message]) (any, error) {
 				return tt.handlerResp, tt.handlerErr
-			}, "key", p.publish)(&Message{}, headers)
+			}, "key", p.publish)(context.TODO(), ConsumableEvent[Message]{
+				DeliveryInfo: DeliveryInfo{Headers: headers},
+			})
 			p.checkPublished(t, tt.published)
 
 			require.Equal(t, tt.wantResp, resp)
@@ -411,18 +411,15 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	}
 	channel := MockAmqpChannel{Published: make(chan Publish, 1)}
 
-	handlers := &handlers2.QueueHandlers[messageHandlerInvoker]{}
-	msgInvoker := &messageHandlerInvoker{
-		eventType: reflect.TypeOf(Message{}),
-		msgHandler: func(i any, headers Headers) (any, error) {
-			if i.(*Message).Ok {
-				return nil, nil
-			}
-			return nil, errors.New("failed")
-		},
-	}
-	require.NoError(t, handlers.Add("q", "key1", msgInvoker))
-	require.NoError(t, handlers.Add("q", "key2", msgInvoker))
+	handlers := QueueHandlers{}
+	handler := newWrappedHandler(func(ctx context.Context, msg ConsumableEvent[Message]) (any, error) {
+		if msg.Payload.Ok {
+			return nil, nil
+		}
+		return nil, errors.New("failed")
+	})
+	require.NoError(t, handlers.Add("q", "key1", handler))
+	require.NoError(t, handlers.Add("q", "key2", handler))
 
 	queueDeliveries := make(chan amqp.Delivery, 6)
 
@@ -433,12 +430,10 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	close(queueDeliveries)
 
 	c := Connection{
-		started:       true,
-		channel:       &channel,
-		messageLogger: noOpMessageLogger(),
-		errorLog:      noOpLogger,
+		started: true,
+		channel: &channel,
 	}
-	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0].Handlers)
+	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0])
 
 	require.Equal(t, 1, len(acker.Rejects))
 	require.Equal(t, 1, len(acker.Nacks))
@@ -455,7 +450,6 @@ func Test_messageHandlerBindQueueToExchange(t *testing.T) {
 	cfg := &QueueBindingConfig{
 		routingKey:   "routingkey",
 		handler:      nil,
-		eventType:    nil,
 		queueName:    "queue",
 		exchangeName: "exchange",
 		kind:         kindDirect,
@@ -483,8 +477,8 @@ func Test_HandleMessage_Nack_WhenUnhandled(t *testing.T) {
 	require.Equal(t, Nack{tag: 0x0, multiple: false, requeue: true}, <-testHandleMessage("{}", false).Nacks)
 }
 
-func Test_HandleMessage_Reject_IfParseFails(t *testing.T) {
-	require.Equal(t, Reject{tag: 0x0, requeue: false}, <-testHandleMessage("", true).Rejects)
+func Test_HandleMessage_Nack_IfParseFails(t *testing.T) {
+	require.Equal(t, Nack{tag: 0x0, requeue: false}, <-testHandleMessage("", true).Nacks)
 }
 
 func testHandleMessage(json string, handle bool) MockAcknowledger {
@@ -493,17 +487,26 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 	delivery := amqp.Delivery{
 		Body:         []byte(json),
 		Acknowledger: &acker,
+		RoutingKey:   "key",
 	}
-	c := &Connection{
-		messageLogger: noOpMessageLogger(),
-		errorLog:      noOpLogger,
+	c := &Connection{}
+	deliveries := make(chan amqp.Delivery)
+	queue := Queue{
+		Name: "",
+		Handlers: &Handlers{
+			"key": newWrappedHandler(func(ctx context.Context, msg ConsumableEvent[Message]) (any, error) {
+				if handle {
+					return nil, nil
+				}
+				return nil, errors.New("failed")
+			}),
+		},
 	}
-	c.handleMessage(delivery, func(i any, headers Headers) (any, error) {
-		if handle {
-			return nil, nil
-		}
-		return nil, errors.New("failed")
-	}, reflect.TypeOf(Message{}))
+	go func() {
+		deliveries <- delivery
+		close(deliveries)
+	}()
+	c.divertToMessageHandlers(deliveries, queue)
 	return acker
 }
 
@@ -529,7 +532,7 @@ func Test_HandleMessage_RecoverableError(t *testing.T) {
 
 func Test_Publisher_ReservedHeader(t *testing.T) {
 	p := NewPublisher()
-	err := p.PublishWithContext(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})
+	err := p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})
 	require.EqualError(t, err, "reserved key service used, please change to use another one")
 }
 
@@ -570,7 +573,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 		keyToType map[string]reflect.Type
 	}
 	type args struct {
-		handler func(t *testing.T) HandlerFunc
+		handler func(t *testing.T) Handler
 		msg     json.RawMessage
 		key     string
 	}
@@ -587,8 +590,8 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 			args: args{
 				msg: []byte(`{"a":true}`),
 				key: "unknown",
-				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, msg any) (response any, err error) {
 						return nil, nil
 					}
 				},
@@ -606,8 +609,8 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 			args: args{
 				msg: []byte(`{"a:}`),
 				key: "known",
-				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, msg any) (response any, err error) {
 						return nil, nil
 					}
 				},
@@ -627,8 +630,8 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 			args: args{
 				msg: []byte(`{"a":true}`),
 				key: "known",
-				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, msg any) (response any, err error) {
 						assert.IsType(t, &TestMessage{}, msg)
 						return nil, fmt.Errorf("handler-error")
 					}
@@ -649,8 +652,8 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 			args: args{
 				msg: []byte(`{"a":true}`),
 				key: "known",
-				handler: func(t *testing.T) HandlerFunc {
-					return func(msg any, headers Headers) (response any, err error) {
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, msg any) (response any, err error) {
 						assert.IsType(t, &TestMessage{}, msg)
 						return "OK", nil
 					}
@@ -668,7 +671,10 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 			}
 
 			handler := c.TypeMappingHandler(tt.args.handler(t))
-			res, err := handler(&tt.args.msg, headers(make(amqp.Table), tt.args.key))
+			res, err := handler(context.TODO(), ConsumableEvent[json.RawMessage]{
+				Payload:      tt.args.msg,
+				DeliveryInfo: DeliveryInfo{RoutingKey: tt.args.key},
+			})
 			if !tt.wantErr(t, err) {
 				return
 			}
