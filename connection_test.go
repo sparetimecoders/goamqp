@@ -355,24 +355,24 @@ func TestResponseWrapper(t *testing.T) {
 			name:         "handler ok - with resp - publish error",
 			handlerResp:  Message{},
 			publisherErr: errors.New("amqp error"),
-			wantErr:      errors.New("failed to publish response: amqp error"),
+			wantErr:      errors.New("failed to publish response, amqp error"),
 		},
 		{
 			name:       "handler error - no resp - nothing published",
 			handlerErr: errors.New("failed"),
-			wantErr:    errors.New("failed to process message: failed"),
+			wantErr:    errors.New("failed to process message, failed"),
 		},
 		{
 			name:        "handler error - with resp - nothing published",
 			handlerResp: Message{},
 			handlerErr:  errors.New("failed"),
-			wantErr:     errors.New("failed to process message: failed"),
+			wantErr:     errors.New("failed to process message, failed"),
 		},
 		{
 			name:        "handler ok - with resp - missing header",
 			handlerResp: Message{},
 			headers:     &Headers{},
-			wantErr:     errors.New("failed to extract service name: no service found"),
+			wantErr:     errors.New("failed to extract service name, no service found"),
 		},
 	}
 

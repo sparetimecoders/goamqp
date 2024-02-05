@@ -25,6 +25,7 @@ package goamqp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,7 +34,6 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/pkg/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -214,16 +214,16 @@ func responseWrapper[T, R any](handler RequestResponseEventHandler[T, R], routin
 	return func(ctx context.Context, event ConsumableEvent[T]) (err error) {
 		resp, err := handler(ctx, event)
 		if err != nil {
-			return errors.Wrap(err, "failed to process message")
+			return fmt.Errorf("failed to process message, %w", err)
 		}
 		service, err := sendingService(event.DeliveryInfo)
 		if err != nil {
-			return errors.Wrap(err, "failed to extract service name")
+			return fmt.Errorf("failed to extract service name, %w", err)
 		}
 		// TODO Handle response with type R
 		err = publisher(ctx, service, routingKey, resp)
 		if err != nil {
-			return errors.Wrapf(err, "failed to publish response")
+			return fmt.Errorf("failed to publish response, %w", err)
 		}
 		return nil
 	}

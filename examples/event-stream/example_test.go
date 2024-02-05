@@ -30,7 +30,7 @@ import (
 )
 
 // var amqpURL = "amqp://user:password@localhost:5672/test"
-var amqpURL = "amqp://user:password@localhostl:5672/test"
+var amqpURL = "amqp://user:password@localhost:5672/test"
 
 func Test_A(t *testing.T) {
 	ctx := context.Background()
