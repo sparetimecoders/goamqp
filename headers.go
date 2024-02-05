@@ -23,9 +23,9 @@
 package goamqp
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/pkg/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
