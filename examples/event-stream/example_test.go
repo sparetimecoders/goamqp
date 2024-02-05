@@ -84,6 +84,7 @@ func (s *StatService) handleOrderUpdated(ctx context.Context, msg ConsumableEven
 	fmt.Printf("Updated order id, %s - %s\n", msg.Payload.Id, msg.Payload.Data)
 	return nil, nil
 }
+
 func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEvent[OrderCreated]) (response any, err error) {
 	// Just to make sure the Output is correct in the example...
 	fmt.Printf("Created order, %s\n", msg.Payload.Id)
