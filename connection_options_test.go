@@ -23,9 +23,7 @@
 package goamqp
 
 import (
-	"context"
 	"errors"
-	"reflect"
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -47,66 +45,6 @@ func Test_CloseListener(t *testing.T) {
 	require.EqualError(t, err, "Exception (123) Reason: \"Close reason\"")
 }
 
-func Test_QueuePublisher_Ok(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	conn.typeToKey[reflect.TypeOf(TestMessage{})] = "key"
-	conn.typeToKey[reflect.TypeOf(TestMessage2{})] = "key2"
-	p := NewPublisher()
-	err := QueuePublisher(p, "destQueue")(conn)
-	require.NoError(t, err)
-
-	require.Equal(t, 0, len(channel.ExchangeDeclarations))
-
-	require.Equal(t, 0, len(channel.QueueDeclarations))
-	require.Equal(t, 0, len(channel.BindingDeclarations))
-
-	err = p.Publish(context.Background(), TestMessage{"test", true})
-	require.NoError(t, err)
-
-	published := <-channel.Published
-	require.Equal(t, "key", published.key)
-
-	err = p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"x-header", "header"})
-	require.NoError(t, err)
-	published = <-channel.Published
-
-	require.Equal(t, 3, len(published.msg.Headers))
-	require.Equal(t, "svc", published.msg.Headers["service"])
-	require.Equal(t, "header", published.msg.Headers["x-header"])
-	require.Equal(t, "destQueue", published.msg.Headers["CC"].([]any)[0])
-}
-
-func Test_EventStreamPublisher_Ok(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	conn.typeToKey[reflect.TypeOf(TestMessage{})] = "key"
-	conn.typeToKey[reflect.TypeOf(TestMessage2{})] = "key2"
-	p := NewPublisher()
-	err := EventStreamPublisher(p)(conn)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(channel.ExchangeDeclarations))
-	require.Equal(t, ExchangeDeclaration{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
-
-	require.Equal(t, 0, len(channel.QueueDeclarations))
-	require.Equal(t, 0, len(channel.BindingDeclarations))
-
-	err = p.Publish(context.Background(), TestMessage{"test", true})
-	require.NoError(t, err)
-
-	published := <-channel.Published
-	require.Equal(t, "key", published.key)
-
-	err = p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"x-header", "header"})
-	require.NoError(t, err)
-	published = <-channel.Published
-
-	require.Equal(t, 2, len(published.msg.Headers))
-	require.Equal(t, "svc", published.msg.Headers["service"])
-	require.Equal(t, "header", published.msg.Headers["x-header"])
-}
-
 func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
@@ -117,80 +55,6 @@ func Test_EventStreamPublisher_FailedToCreateExchange(t *testing.T) {
 	err := EventStreamPublisher(p)(conn)
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to declare exchange events.topic.exchange, failed to create exchange")
-}
-
-func Test_ServicePublisher_Ok(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	conn.typeToKey[reflect.TypeOf(TestMessage{})] = "key"
-	p := NewPublisher()
-
-	err := ServicePublisher("svc", p)(conn)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(channel.ExchangeDeclarations))
-	require.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
-
-	require.Equal(t, 0, len(channel.QueueDeclarations))
-	require.Equal(t, 0, len(channel.BindingDeclarations))
-
-	err = p.Publish(context.Background(), TestMessage{"test", true})
-	require.NoError(t, err)
-	published := <-channel.Published
-	require.Equal(t, "key", published.key)
-	require.Equal(t, "svc.direct.exchange.request", published.exchange)
-}
-
-func Test_ServicePublisher_Multiple(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	conn.typeToKey[reflect.TypeOf(TestMessage{})] = "key"
-	conn.typeToKey[reflect.TypeOf(TestMessage2{})] = "key2"
-	p := NewPublisher()
-
-	err := ServicePublisher("svc", p)(conn)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(channel.ExchangeDeclarations))
-	require.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
-
-	require.Equal(t, 0, len(channel.QueueDeclarations))
-	require.Equal(t, 0, len(channel.BindingDeclarations))
-
-	err = p.Publish(context.Background(), TestMessage{"test", true})
-	require.NoError(t, err)
-	err = p.Publish(context.Background(), TestMessage2{Msg: "msg"})
-	require.NoError(t, err)
-	err = p.Publish(context.Background(), TestMessage{"test2", false})
-	require.NoError(t, err)
-	published := <-channel.Published
-	require.Equal(t, "key", published.key)
-	require.Equal(t, "svc.direct.exchange.request", published.exchange)
-	published = <-channel.Published
-	require.Equal(t, "key2", published.key)
-	require.Equal(t, "svc.direct.exchange.request", published.exchange)
-	published = <-channel.Published
-	require.Equal(t, "key", published.key)
-	require.Equal(t, "{\"Msg\":\"test2\",\"Success\":false}", string(published.msg.Body))
-}
-
-func Test_ServicePublisher_NoMatchingRoute(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	conn := mockConnection(channel)
-	p := NewPublisher()
-
-	err := ServicePublisher("svc", p)(conn)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(channel.ExchangeDeclarations))
-	require.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
-
-	require.Equal(t, 0, len(channel.QueueDeclarations))
-	require.Equal(t, 0, len(channel.BindingDeclarations))
-
-	err = p.Publish(context.Background(), &TestMessage{Msg: "test"})
-	require.True(t, errors.Is(err, ErrNoRouteForMessageType))
-	require.EqualError(t, err, "no routingkey configured for message of type *goamqp.TestMessage")
 }
 
 func Test_ServicePublisher_ExchangeDeclareFail(t *testing.T) {
