@@ -96,7 +96,7 @@ func Test_Start_SetupFails(t *testing.T) {
 		serviceName:   "test",
 		connection:    mockAmqpConnection,
 		channel:       mockChannel,
-		queueHandlers: &QueueHandlers{},
+		queueHandlers: &queueHandlers{},
 	}
 	err := conn.Start(context.Background(),
 		EventStreamConsumer("test", func(ctx context.Context, msg ConsumableEvent[Message]) error {
@@ -410,15 +410,15 @@ func Test_DivertToMessageHandler(t *testing.T) {
 	}
 	channel := MockAmqpChannel{Published: make(chan Publish, 1)}
 
-	handlers := QueueHandlers{}
+	handlers := queueHandlers{}
 	handler := newWrappedHandler(func(ctx context.Context, msg ConsumableEvent[Message]) error {
 		if msg.Payload.Ok {
 			return nil
 		}
 		return errors.New("failed")
 	})
-	require.NoError(t, handlers.Add("q", "key1", handler))
-	require.NoError(t, handlers.Add("q", "key2", handler))
+	require.NoError(t, handlers.add("q", "key1", handler))
+	require.NoError(t, handlers.add("q", "key2", handler))
 
 	queueDeliveries := make(chan amqp.Delivery, 6)
 
@@ -432,7 +432,7 @@ func Test_DivertToMessageHandler(t *testing.T) {
 		started: true,
 		channel: &channel,
 	}
-	c.divertToMessageHandlers(queueDeliveries, handlers.Queues()[0])
+	c.divertToMessageHandlers(queueDeliveries, handlers.queues()[0])
 
 	require.Equal(t, 1, len(acker.Rejects))
 	require.Equal(t, 1, len(acker.Nacks))
@@ -490,9 +490,9 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 	}
 	c := &Connection{}
 	deliveries := make(chan amqp.Delivery)
-	queue := QueueWithHandlers{
+	queue := queueWithHandlers{
 		Name: "",
-		Handlers: &Handlers{
+		Handlers: &handlers{
 			"key": newWrappedHandler(func(ctx context.Context, msg ConsumableEvent[Message]) error {
 				if handle {
 					return nil

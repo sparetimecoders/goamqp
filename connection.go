@@ -45,7 +45,7 @@ type Connection struct {
 	connection  amqpConnection
 	// TODO One channel per queue/consumer
 	channel        AmqpChannel
-	queueHandlers  *QueueHandlers
+	queueHandlers  *queueHandlers
 	typeToKey      map[reflect.Type]string
 	keyToType      map[string]reflect.Type
 	notificationCh chan<- Notification
@@ -102,17 +102,6 @@ func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
 	return newConnection(serviceName, uri), nil
 }
 
-// Must is a helper that wraps a call to a function returning (*T, error)
-// and panics if the error is non-nil. It is intended for use in variable
-// initializations such as
-// var c = goamqp.Must(goamqp.NewFromURL("service", "amqp://"))
-func Must[T any](t *T, err error) *T {
-	if err != nil {
-		panic(err)
-	}
-	return t
-}
-
 // PublishServiceResponse sends a message to targetService as a handler response
 func (c *Connection) PublishServiceResponse(ctx context.Context, targetService, routingKey string, msg any) error {
 	return c.publishMessage(ctx, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
@@ -162,31 +151,6 @@ func (c *Connection) Close() error {
 	return c.connection.Close()
 }
 
-// AmqpChannel wraps the amqp.Channel to allow for mocking
-type AmqpChannel interface {
-	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
-	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
-	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
-	PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
-	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
-	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
-	NotifyClose(c chan *amqp.Error) chan *amqp.Error
-	Confirm(noWait bool) error
-	// Qos controls how many messages or how many bytes the server will try to keep on
-	// the network for consumers before receiving delivery acks.  The intent of Qos is
-	// to make sure the network buffers stay full between the server and client.
-	// If your consumer work time is reasonably consistent and not much greater
-	// than two times your network round trip time, you will see significant
-	// throughput improvements starting with a prefetch count of 2 or slightly
-	// greater as described by benchmarks on RabbitMQ.
-	//
-	// http://www.rabbitmq.com/blog/2012/04/25/rabbitmq-performance-measurements-part-2/
-	// The default prefetchCount is 20 (and global true) and can be overridden with WithPrefetchLimit
-	Qos(prefetchCount, prefetchSize int, global bool) error
-}
-
-var _ AmqpChannel = &amqp.Channel{}
-
 type amqpConnection interface {
 	io.Closer
 	Channel() (*amqp.Channel, error)
@@ -220,7 +184,6 @@ func responseWrapper[T, R any](handler RequestResponseEventHandler[T, R], routin
 		if err != nil {
 			return fmt.Errorf("failed to extract service name, %w", err)
 		}
-		// TODO Handle response with type R
 		err = publisher(ctx, service, routingKey, resp)
 		if err != nil {
 			return fmt.Errorf("failed to publish response, %w", err)
@@ -314,7 +277,7 @@ func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind
 }
 
 func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
-	return c.queueHandlers.Add(queueName, routingKey, handler)
+	return c.queueHandlers.add(queueName, routingKey, handler)
 }
 
 func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, exchangeName string, headers amqp.Table) error {
@@ -347,7 +310,7 @@ func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
 	return deliveryInfo
 }
 
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue QueueWithHandlers) {
+func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue queueWithHandlers) {
 	for delivery := range deliveries {
 		startTime := time.Now()
 		deliveryInfo := getDeliveryInfo(queue.Name, delivery)
@@ -363,7 +326,6 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, qu
 
 		uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
 		tracingCtx := extractToContext(delivery.Headers)
-		// TODO Handle response
 		if err := handler(tracingCtx, uevt); err != nil {
 			elapsed := time.Since(startTime).Milliseconds()
 			notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
@@ -423,15 +385,15 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
 		serviceName:   serviceName,
 		amqpUri:       uri,
-		queueHandlers: &QueueHandlers{},
+		queueHandlers: &queueHandlers{},
 		keyToType:     make(map[string]reflect.Type),
 		typeToKey:     make(map[reflect.Type]string),
 	}
 }
 
 func (c *Connection) setup() error {
-	for _, queue := range c.queueHandlers.Queues() {
-		// TODO one channel per queue`
+	for _, queue := range c.queueHandlers.queues() {
+		// TODO one channel per queue
 		consumer, err := consume(c.channel, queue.Name)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)

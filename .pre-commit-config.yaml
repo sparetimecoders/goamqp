@@ -24,3 +24,15 @@ repos:
       - id: go-test-mod
       - id: go-fumpt
       - id: golangci-lint-mod
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.4
+    hooks:
+    - id: insert-license
+      files: \_test.go$
+      args:
+        - --license-filepath
+        - LICENSE        # defaults to: LICENSE.txt
+        - --comment-style
+        - //                           # defaults to:  #
+        - --use-current-year
+        - --no-extra-eol                # see below
