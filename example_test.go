@@ -17,15 +17,13 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-package goamqp_test
+package goamqp
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"time"
-
-	. "github.com/sparetimecoders/goamqp"
 )
 
 var amqpURL = "amqp://user:password@localhost:5672/"
