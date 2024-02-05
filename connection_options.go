@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -49,6 +50,32 @@ func WithTypeMapping(routingKey string, msgType any) Setup {
 		return nil
 	}
 }
+
+//func WithTypeMappingHandler(handler Handler) Setup {
+//	return func(c *Connection) error {
+//		return nil
+//	}
+//}
+/*
+	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
+		routingKey := event.DeliveryInfo.RoutingKey
+		typ, exists := c.keyToType[routingKey]
+		if !exists {
+			return nil
+		}
+		message := reflect.New(typ).Interface()
+		if err := json.Unmarshal(event.Payload, &message); err != nil {
+			return err
+		}
+		if err := handler(ctx, message); err == nil {
+			return nil
+		} else {
+			return err
+		}
+	}
+}
+
+*/
 
 func WithHandler[T any](routingKey string, handler EventHandler[T]) Setup {
 	exchangeName := topicExchangeName(defaultEventExchangeName)
@@ -258,9 +285,11 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 
 // RequestResponseHandler is a convenience func to set up ServiceRequestConsumer and combines it with
 // PublishServiceResponse
-func RequestResponseHandler[T any](routingKey string, handler EventHandler[T]) Setup {
+func RequestResponseHandler[T any, R any](routingKey string, handler RequestResponseEventHandler[T, R]) Setup {
 	return func(c *Connection) error {
-		responseHandlerWrapper := responseWrapper(handler, routingKey, c.PublishServiceResponse)
+		responseHandlerWrapper := responseWrapper(handler, routingKey, func(ctx context.Context, targetService, routingKey string, msg R) error {
+			return c.PublishServiceResponse(ctx, targetService, routingKey, msg)
+		})
 		return ServiceRequestConsumer[T](routingKey, responseHandlerWrapper)(c)
 	}
 }

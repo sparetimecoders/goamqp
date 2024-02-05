@@ -30,7 +30,7 @@ import (
 )
 
 // var amqpURL = "amqp://user:password@localhost:5672/test"
-var amqpURL = "amqp://user:password@goodfeed-control-plane.orb.local:5672/test"
+var amqpURL = "amqp://user:password@localhostl:5672/test"
 
 func Test_A(t *testing.T) {
 	ctx := context.Background()
@@ -80,15 +80,15 @@ func (s *StatService) Start(ctx context.Context) error {
 	)
 }
 
-func (s *StatService) handleOrderUpdated(ctx context.Context, msg ConsumableEvent[OrderUpdated]) (response any, err error) {
+func (s *StatService) handleOrderUpdated(ctx context.Context, msg ConsumableEvent[OrderUpdated]) error {
 	fmt.Printf("Updated order id, %s - %s\n", msg.Payload.Id, msg.Payload.Data)
-	return nil, nil
+	return nil
 }
 
-func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEvent[OrderCreated]) (response any, err error) {
+func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEvent[OrderCreated]) error {
 	// Just to make sure the Output is correct in the example...
 	fmt.Printf("Created order, %s\n", msg.Payload.Id)
-	return nil, nil
+	return nil
 }
 
 // -- ShippingService
@@ -106,10 +106,11 @@ func (s *ShippingService) Start(ctx context.Context) error {
 	return s.connection.Start(ctx,
 		WithTypeMapping("Order.Created", OrderCreated{}),
 		WithTypeMapping("Order.Updated", OrderUpdated{}),
-		WithHandler("#", s.connection.TypeMappingHandler(func(ctx context.Context, event any) (any, error) {
-			return s.handleOrderEvent(ctx, event)
-		}),
-		))
+		//WithHandler("#", s.connection.TypeMappingHandler(func(ctx context.Context, event any) (any, error) {
+		//	return s.handleOrderEvent(ctx, event)
+		//}),
+		//)
+	)
 }
 
 func (s *ShippingService) handleOrderEvent(ctx context.Context, msg any) (response any, err error) {

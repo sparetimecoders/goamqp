@@ -26,34 +26,45 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"reflect"
+	"regexp"
+	"strconv"
+
+	"github.com/google/uuid"
 )
 
 type amqpAdmin struct {
 	httpClient   *http.Client
 	amqpAdminURL string
-	password     string
-	username     string
-	vhost        string
+	Password     string
+	Username     string
+	Host         string
+	VHost        string
+	Port         int
 }
 
-func AmqpAdmin(host string, port int, username, password, vhost string) *amqpAdmin {
-	return &amqpAdmin{
-		httpClient:   &http.Client{},
-		amqpAdminURL: fmt.Sprintf("http://%s:%d/api", host, port),
-		username:     username,
-		password:     password,
-		vhost:        vhost,
+func ParseAmqpURL(amqpURL string) *amqpAdmin {
+	amqpConnectionRegex := regexp.MustCompile(`(?:amqp:\/\/)?(?P<Username>.*):(?P<Password>.*?)@(?P<Host>.*?)(?:\:(?P<Port>\d*))?(?:\/(?P<VHost>.*))?$`)
+	if amqpConnectionRegex.MatchString(amqpURL) {
+		a := convertToAmqpConfig(mapValues(amqpConnectionRegex, amqpConnectionRegex.FindStringSubmatch(amqpURL)))
+		a.httpClient = &http.Client{}
+		a.amqpAdminURL = fmt.Sprintf("http://%s:%d/api", a.Host, 15672)
+		a.VHost = uuid.New().String()
+		return a
 	}
+	log.Panicf("invalid Amqp URL: %s", amqpURL)
+	return nil
 }
 
 func (a *amqpAdmin) CreateVHost() error {
-	_, err := a.request(http.MethodPut, fmt.Sprintf("/vhosts/%s", a.vhost), nil)
+	_, err := a.request(http.MethodPut, fmt.Sprintf("/vhosts/%s", a.VHost), nil)
 	return err
 }
 
 func (a *amqpAdmin) DeleteVHost() error {
-	_, err := a.request(http.MethodDelete, fmt.Sprintf("/vhosts/%s", a.vhost), nil)
+	_, err := a.request(http.MethodDelete, fmt.Sprintf("/vhosts/%s", a.VHost), nil)
 	return err
 }
 
@@ -69,7 +80,7 @@ func (a *amqpAdmin) GetExchange(name string) (*Exchange, error) {
 }
 
 func (a *amqpAdmin) GetExchanges(filterDefaults bool) ([]Exchange, error) {
-	resp, err := a.request(http.MethodGet, fmt.Sprintf("/exchanges/%s", a.vhost), nil)
+	resp, err := a.request(http.MethodGet, fmt.Sprintf("/exchanges/%s", a.VHost), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +110,7 @@ func (a *amqpAdmin) GetQueue(name string) (*Queue, error) {
 }
 
 func (a *amqpAdmin) GetQueues() ([]Queue, error) {
-	resp, err := a.request(http.MethodGet, fmt.Sprintf("/queues/%s", a.vhost), nil)
+	resp, err := a.request(http.MethodGet, fmt.Sprintf("/queues/%s", a.VHost), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +120,7 @@ func (a *amqpAdmin) GetQueues() ([]Queue, error) {
 }
 
 func (a *amqpAdmin) GetBindings(queueName string, filterDefault bool) ([]Binding, error) {
-	resp, err := a.request(http.MethodGet, fmt.Sprintf("/queues/%s/%s/bindings", a.vhost, queueName), nil)
+	resp, err := a.request(http.MethodGet, fmt.Sprintf("/queues/%s/%s/bindings", a.VHost, queueName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +143,7 @@ func (a *amqpAdmin) request(method, path string, body io.Reader) (*http.Response
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(a.username, a.password)
+	req.SetBasicAuth(a.Username, a.Password)
 	return a.httpClient.Do(req)
 }
 
@@ -199,3 +210,33 @@ func (q Queue) Named() string {
 }
 
 var defaultExchanges = []string{"", "amq.direct", "amq.fanout", "amq.headers", "amq.match", "amq.rabbitmq.trace", "amq.topic"}
+
+func convertToAmqpConfig(mappedValues map[string]string) *amqpAdmin {
+	c := &amqpAdmin{}
+	r := reflect.ValueOf(c).Elem()
+	for i := 0; i < r.NumField(); i++ {
+		field := r.Type().Field(i)
+		value := mappedValues[field.Name]
+		if value == "" {
+			continue
+		}
+		v := reflect.ValueOf(value)
+		if field.Type.Kind() == reflect.Int {
+			atoi, _ := strconv.Atoi(value)
+			r.Field(i).Set(reflect.ValueOf(atoi))
+		} else if field.Type.Kind() == reflect.String {
+			r.Field(i).Set(v)
+		}
+	}
+	return c
+}
+
+func mapValues(amqpConnectionRegex *regexp.Regexp, groups []string) map[string]string {
+	mappedValues := make(map[string]string)
+	for i, name := range amqpConnectionRegex.SubexpNames() {
+		if i != 0 && name != "" {
+			mappedValues[name] = groups[i]
+		}
+	}
+	return mappedValues
+}

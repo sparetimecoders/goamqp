@@ -31,20 +31,23 @@ import (
 	"strings"
 )
 
-type Handler func(ctx context.Context, event any) (any, error)
+// type Handler func(ctx context.Context, event any) error
 
 // EventHandler is the type definition for a function that is used to handle events of a specific type.
 // TODO HandlerFunc is used to process an incoming message
 // If processing fails, an error should be returned and the message will be re-queued
 // The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
 
-type EventHandler[T any] func(ctx context.Context, event ConsumableEvent[T]) (any, error)
+type (
+	EventHandler[T any]                       func(ctx context.Context, event ConsumableEvent[T]) error
+	RequestResponseEventHandler[T any, R any] func(ctx context.Context, event ConsumableEvent[T]) (R, error)
+)
 
 // Handlers holds the handlers for a certain queue
 type Handlers map[string]wrappedHandler
 
-// Get returns the handler for the given queue and routing key that matches
-func (h *Handlers) Get(routingKey string) (wrappedHandler, bool) {
+// get returns the handler for the given queue and routing key that matches
+func (h *Handlers) get(routingKey string) (wrappedHandler, bool) {
 	for mappedRoutingKey, handler := range *h {
 		if match(mappedRoutingKey, routingKey) {
 			return handler, true
@@ -85,19 +88,19 @@ func (h *QueueHandlers) Add(queueName, routingKey string, handler wrappedHandler
 	return nil
 }
 
-type Queue struct {
+type QueueWithHandlers struct {
 	Name     string
 	Handlers *Handlers
 }
 
 // Queues returns all queue names for which we have added a handler
-func (h *QueueHandlers) Queues() []Queue {
+func (h *QueueHandlers) Queues() []QueueWithHandlers {
 	if h == nil {
-		return []Queue{}
+		return []QueueWithHandlers{}
 	}
-	var res []Queue
+	var res []QueueWithHandlers
 	for q, h := range *h {
-		res = append(res, Queue{Name: q, Handlers: h})
+		res = append(res, QueueWithHandlers{Name: q, Handlers: h})
 	}
 	return res
 }
@@ -116,17 +119,17 @@ func (h *QueueHandlers) Handlers(queueName string) *Handlers {
 
 // wrappedHandler is internally used to wrap the generic EventHandler
 // this is to facilitate adding all the different type of T on the same map
-type wrappedHandler func(ctx context.Context, event unmarshalEvent) (any, error)
+type wrappedHandler func(ctx context.Context, event unmarshalEvent) error
 
 func newWrappedHandler[T any](handler EventHandler[T]) wrappedHandler {
-	return func(ctx context.Context, event unmarshalEvent) (any, error) {
+	return func(ctx context.Context, event unmarshalEvent) error {
 		consumableEvent := ConsumableEvent[T]{
 			Metadata:     event.Metadata,
 			DeliveryInfo: event.DeliveryInfo,
 		}
 		err := json.Unmarshal(event.Payload, &consumableEvent.Payload)
 		if err != nil {
-			return nil, fmt.Errorf("%v: %w", err, ErrParseJSON)
+			return fmt.Errorf("%v: %w", err, ErrParseJSON)
 		}
 		return handler(ctx, consumableEvent)
 	}
