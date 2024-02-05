@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/sparetimecoders/goamqp"
+	"github.com/sparetimecoders/goamqp"
 )
 
 // var amqpURL = "amqp://user:password@localhost:5672/test"
@@ -37,12 +37,12 @@ func Test_A(t *testing.T) {
 	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
 		amqpURL = urlFromEnv
 	}
-	orderServiceConnection := Must(NewFromURL("order-service", amqpURL))
-	orderPublisher := NewPublisher()
+	orderServiceConnection := goamqp.Must(goamqp.NewFromURL("order-service", amqpURL))
+	orderPublisher := goamqp.NewPublisher()
 	err := orderServiceConnection.Start(ctx,
-		EventStreamPublisher(orderPublisher),
-		WithTypeMapping("Order.Created", OrderCreated{}),
-		WithTypeMapping("Order.Updated", OrderUpdated{}),
+		goamqp.EventStreamPublisher(orderPublisher),
+		goamqp.WithTypeMapping("Order.Created", OrderCreated{}),
+		goamqp.WithTypeMapping("Order.Updated", OrderUpdated{}),
 	)
 	checkError(err)
 
@@ -65,7 +65,7 @@ func Test_A(t *testing.T) {
 
 // -- StatService
 type StatService struct {
-	connection *Connection
+	connection *goamqp.Connection
 }
 
 func (s *StatService) Stop() error {
@@ -73,19 +73,19 @@ func (s *StatService) Stop() error {
 }
 
 func (s *StatService) Start(ctx context.Context) error {
-	s.connection = Must(NewFromURL("stat-service", amqpURL))
+	s.connection = goamqp.Must(goamqp.NewFromURL("stat-service", amqpURL))
 	return s.connection.Start(ctx,
-		WithHandler("Order.Created", s.handleOrderCreated),
-		WithHandler("Order.Updated", s.handleOrderUpdated),
+		goamqp.WithHandler("Order.Created", s.handleOrderCreated),
+		goamqp.WithHandler("Order.Updated", s.handleOrderUpdated),
 	)
 }
 
-func (s *StatService) handleOrderUpdated(ctx context.Context, msg ConsumableEvent[OrderUpdated]) error {
+func (s *StatService) handleOrderUpdated(ctx context.Context, msg goamqp.ConsumableEvent[OrderUpdated]) error {
 	fmt.Printf("Updated order id, %s - %s\n", msg.Payload.Id, msg.Payload.Data)
 	return nil
 }
 
-func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEvent[OrderCreated]) error {
+func (s *StatService) handleOrderCreated(ctx context.Context, msg goamqp.ConsumableEvent[OrderCreated]) error {
 	// Just to make sure the Output is correct in the example...
 	fmt.Printf("Created order, %s\n", msg.Payload.Id)
 	return nil
@@ -93,7 +93,7 @@ func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEven
 
 // -- ShippingService
 type ShippingService struct {
-	connection *Connection
+	connection *goamqp.Connection
 }
 
 func (s *ShippingService) Stop() error {
@@ -101,11 +101,11 @@ func (s *ShippingService) Stop() error {
 }
 
 func (s *ShippingService) Start(ctx context.Context) error {
-	s.connection = Must(NewFromURL("shipping-service", amqpURL))
+	s.connection = goamqp.Must(goamqp.NewFromURL("shipping-service", amqpURL))
 
 	return s.connection.Start(ctx,
-		WithTypeMapping("Order.Created", OrderCreated{}),
-		WithTypeMapping("Order.Updated", OrderUpdated{}),
+		goamqp.WithTypeMapping("Order.Created", OrderCreated{}),
+		goamqp.WithTypeMapping("Order.Updated", OrderUpdated{}),
 		//WithHandler("#", s.connection.TypeMappingHandler(func(ctx context.Context, event any) (any, error) {
 		//	return s.handleOrderEvent(ctx, event)
 		//}),

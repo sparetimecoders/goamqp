@@ -25,7 +25,7 @@ import (
 	"os"
 	"time"
 
-	. "github.com/sparetimecoders/goamqp"
+	"github.com/sparetimecoders/goamqp"
 )
 
 var amqpURL = "amqp://user:password@localhost:5672/test"
@@ -36,19 +36,19 @@ func Example_request_response() {
 		amqpURL = urlFromEnv
 	}
 	routingKey := "key"
-	serviceConnection := Must(NewFromURL("service", amqpURL))
+	serviceConnection := goamqp.Must(goamqp.NewFromURL("service", amqpURL))
 	err := serviceConnection.Start(ctx,
-		RequestResponseHandler(routingKey, handleRequest),
+		goamqp.RequestResponseHandler(routingKey, handleRequest),
 	)
 	checkError(err)
 
-	clientConnection := Must(NewFromURL("client", amqpURL))
-	publisher := NewPublisher()
+	clientConnection := goamqp.Must(goamqp.NewFromURL("client", amqpURL))
+	publisher := goamqp.NewPublisher()
 
 	err = clientConnection.Start(ctx,
-		WithTypeMapping(routingKey, Request{}),
-		ServicePublisher("service", publisher),
-		ServiceResponseConsumer("service", routingKey, handleResponse),
+		goamqp.WithTypeMapping(routingKey, Request{}),
+		goamqp.ServicePublisher("service", publisher),
+		goamqp.ServiceResponseConsumer("service", routingKey, handleResponse),
 	)
 	checkError(err)
 
@@ -70,13 +70,13 @@ func checkError(err error) {
 	}
 }
 
-func handleRequest(ctx context.Context, m ConsumableEvent[Request]) (any, error) {
+func handleRequest(ctx context.Context, m goamqp.ConsumableEvent[Request]) (any, error) {
 	response := Response{Data: m.Payload.Data}
 	fmt.Printf("Called process with %v, returning response %v\n", m.Payload.Data, response)
 	return response, nil
 }
 
-func handleResponse(ctx context.Context, m ConsumableEvent[Response]) error {
+func handleResponse(ctx context.Context, m goamqp.ConsumableEvent[Response]) error {
 	fmt.Printf("Got response, %v\n", m.Payload.Data)
 	return nil
 }
