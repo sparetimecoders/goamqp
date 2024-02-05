@@ -68,6 +68,59 @@ func (p *Publisher) Publish(ctx context.Context, msg any, headers ...Header) err
 	return fmt.Errorf("%w %s", ErrNoRouteForMessageType, t)
 }
 
+// EventStreamPublisher sets up an event stream publisher
+func EventStreamPublisher(publisher *Publisher) Setup {
+	return StreamPublisher(defaultEventExchangeName, publisher)
+}
+
+// StreamPublisher sets up an event stream publisher
+func StreamPublisher(exchange string, publisher *Publisher) Setup {
+	name := topicExchangeName(exchange)
+	return func(c *Connection) error {
+		if err := c.exchangeDeclare(c.channel, name, kindTopic); err != nil {
+			return fmt.Errorf("failed to declare exchange %s, %w", name, err)
+		}
+		publisher.connection = c
+		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
+			return err
+		}
+		publisher.exchange = name
+		return nil
+	}
+}
+
+// QueuePublisher sets up a publisher that will send events to a specific queue instead of using the exchange,
+// so called Sender-Selected distribution
+// https://www.rabbitmq.com/sender-selected.html#:~:text=The%20RabbitMQ%20broker%20treats%20the,key%20if%20they%20are%20present.
+func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
+	return func(c *Connection) error {
+		publisher.connection = c
+		if err := publisher.setDefaultHeaders(c.serviceName,
+			Header{Key: "CC", Value: []any{destinationQueueName}},
+		); err != nil {
+			return err
+		}
+		publisher.exchange = ""
+		return nil
+	}
+}
+
+// ServicePublisher sets up ap a publisher, that sends messages to the targetService
+func ServicePublisher(targetService string, publisher *Publisher) Setup {
+	return func(c *Connection) error {
+		reqExchangeName := serviceRequestExchangeName(targetService)
+		publisher.connection = c
+		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
+			return err
+		}
+		publisher.exchange = reqExchangeName
+		if err := c.exchangeDeclare(c.channel, reqExchangeName, kindDirect); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
 func (p *Publisher) setDefaultHeaders(serviceName string, headers ...Header) error {
 	for _, h := range headers {
 		if err := h.validateKey(); err != nil {
