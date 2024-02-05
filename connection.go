@@ -327,9 +327,8 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 		Body:         jsonBytes,
 		ContentType:  contentType,
 		DeliveryMode: 2,
-		Headers:      headers,
+		Headers:      injectToHeaders(ctx, headers),
 	}
-
 	return c.channel.PublishWithContext(ctx, exchangeName,
 		routingKey,
 		false,
