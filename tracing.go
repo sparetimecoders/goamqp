@@ -31,15 +31,14 @@ import (
 )
 
 // inject the span context to amqp table
-func injectToHeaders(ctx context.Context) amqp.Table {
+func injectToHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
 	carrier := propagation.MapCarrier{}
 	otel.GetTextMapPropagator().Inject(ctx, carrier)
 
-	header := amqp.Table{}
 	for k, v := range carrier {
-		header[k] = v
+		headers[k] = v
 	}
-	return header
+	return headers
 }
 
 // extract the amqp table to a span context
