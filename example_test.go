@@ -58,9 +58,9 @@ func checkError(err error) {
 	}
 }
 
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) (any, error) {
+func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
 	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil, nil
+	return nil
 }
 
 type IncomingMessage struct {
