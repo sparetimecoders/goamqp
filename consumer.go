@@ -35,7 +35,7 @@ type (
 	// Handler is the type definition for a function that is used to handle events that has been mapped with
 	// RoutingKey <-> Type mappings from WithTypeMapping.
 	// If processing fails, an error should be returned and the message will be re-queued
-	Handler func(ctx context.Context, event any) error
+	Handler func(ctx context.Context, event ConsumableEvent[any]) error
 	// EventHandler is the type definition for a function that is used to handle events of a specific type.
 	// If processing fails, an error should be returned and the message will be re-queued
 	EventHandler[T any] func(ctx context.Context, event ConsumableEvent[T]) error
@@ -54,7 +54,12 @@ func WithTypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
 		if err := json.Unmarshal(event.Payload, &message); err != nil {
 			return err
 		}
-		return handler(ctx, message)
+		msg := ConsumableEvent[any]{
+			Metadata:     event.Metadata,
+			DeliveryInfo: event.DeliveryInfo,
+			Payload:      message,
+		}
+		return handler(ctx, msg)
 	}
 }
 
