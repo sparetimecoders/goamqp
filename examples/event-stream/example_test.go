@@ -26,7 +26,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"testing"
 	"time"
 
 	"github.com/sparetimecoders/goamqp"
@@ -35,7 +34,7 @@ import (
 // var amqpURL = "amqp://user:password@localhost:5672/test"
 var amqpURL = "amqp://user:password@localhost:5672/test"
 
-func Test_A(t *testing.T) {
+func ExampleEventStream() {
 	ctx := context.Background()
 	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
 		amqpURL = urlFromEnv
@@ -64,11 +63,18 @@ func Test_A(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	_ = orderServiceConnection.Close()
 	_ = statService.Stop()
+
+	fmt.Println(statService.output)
+	fmt.Println(shippingService.output)
+	// Output:
+	// [Created order: id Updated order id: id - data]
+	// [Order created Order deleted]
 }
 
 // -- StatService
 type StatService struct {
 	connection *goamqp.Connection
+	output     []string
 }
 
 func (s *StatService) Stop() error {
@@ -78,26 +84,25 @@ func (s *StatService) Stop() error {
 func (s *StatService) Start(ctx context.Context) error {
 	s.connection = goamqp.Must(goamqp.NewFromURL("stat-service", amqpURL))
 	return s.connection.Start(ctx,
-		goamqp.WithHandler("Order.Created", s.handleOrderCreated),
-		goamqp.WithHandler("Order.Updated", s.handleOrderUpdated),
+		goamqp.EventStreamConsumer("Order.Created", s.handleOrderCreated),
+		goamqp.EventStreamConsumer("Order.Updated", s.handleOrderUpdated),
 	)
 }
 
 func (s *StatService) handleOrderUpdated(ctx context.Context, msg goamqp.ConsumableEvent[OrderUpdated]) error {
-	// Just to make sure the Output is correct in the example...
-	fmt.Printf("Updated order id, %s - %s\n", msg.Payload.Id, msg.Payload.Data)
+	s.output = append(s.output, fmt.Sprintf("Updated order id: %s - %s", msg.Payload.Id, msg.Payload.Data))
 	return nil
 }
 
 func (s *StatService) handleOrderCreated(ctx context.Context, msg goamqp.ConsumableEvent[OrderCreated]) error {
-	// Just to make sure the Output is correct in the example...
-	fmt.Printf("Created order, %s\n", msg.Payload.Id)
+	s.output = append(s.output, fmt.Sprintf("Created order: %s", msg.Payload.Id))
 	return nil
 }
 
 // -- ShippingService
 type ShippingService struct {
 	connection *goamqp.Connection
+	output     []string
 }
 
 func (s *ShippingService) Stop() error {
@@ -110,23 +115,17 @@ func (s *ShippingService) Start(ctx context.Context) error {
 	return s.connection.Start(ctx,
 		goamqp.WithTypeMapping("Order.Created", OrderCreated{}),
 		goamqp.WithTypeMapping("Order.Updated", OrderUpdated{}),
-		//WithHandler("#", s.connection.TypeMappingHandler(func(ctx context.Context, event any) (any, error) {
-		//	return s.handleOrderEvent(ctx, event)
-		//}),
-		//)
+		goamqp.EventStreamConsumer("#", goamqp.WithTypeMappingHandler(func(ctx context.Context, event any) error {
+			switch event.(type) {
+			case *OrderCreated:
+				s.output = append(s.output, "Order created")
+			case *OrderUpdated:
+				s.output = append(s.output, "Order deleted")
+			}
+			return nil
+		}),
+		),
 	)
-}
-
-func (s *ShippingService) handleOrderEvent(ctx context.Context, msg any) (response any, err error) {
-	switch msg.(type) {
-	case *OrderCreated:
-		fmt.Println("Order created")
-	case *OrderUpdated:
-		fmt.Println("Order deleted")
-	default:
-		fmt.Println("Unknown message type")
-	}
-	return nil, nil
 }
 
 func checkError(err error) {
