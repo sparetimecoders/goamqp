@@ -38,13 +38,18 @@ type Publisher struct {
 }
 
 // ErrNoRouteForMessageType when the published message cannot be routed.
-var ErrNoRouteForMessageType = fmt.Errorf("no routingkey configured for message of type")
+var (
+	ErrNoRouteForMessageType    = fmt.Errorf("no routingkey configured for message of type")
+	ErrNoMessageTypeForRouteKey = fmt.Errorf("no message type for routingkey configured")
+)
 
 // NewPublisher returns a publisher that can be used to send messages
 func NewPublisher() *Publisher {
 	return &Publisher{}
 }
 
+// Publish tries to publish msg to AMQP.
+// It requires RoutingKey <-> Type mappings from WithTypeMapping in order to set the correct Routing Key for msg
 func (p *Publisher) Publish(ctx context.Context, msg any, headers ...Header) error {
 	table := amqp.Table{}
 	for _, v := range p.defaultHeaders {

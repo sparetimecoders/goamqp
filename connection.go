@@ -46,8 +46,8 @@ type Connection struct {
 	// TODO One channel per queue/consumer
 	channel        AmqpChannel
 	queueHandlers  *queueHandlers
-	typeToKey      map[reflect.Type]string
-	keyToType      map[string]reflect.Type
+	typeToKey      TypeToRoutingKey
+	keyToType      RoutingKeyToType
 	notificationCh chan<- Notification
 }
 
@@ -318,6 +318,8 @@ func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
 
 func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue queueWithHandlers) {
 	for delivery := range deliveries {
+		// TODO Copy readonly to context, write test!
+		handlerCtx := injectRoutingKeyToTypeContext(extractToContext(delivery.Headers), c.keyToType)
 		startTime := time.Now()
 		deliveryInfo := getDeliveryInfo(queue.Name, delivery)
 		EventReceived(queue.Name, deliveryInfo.RoutingKey)
@@ -325,19 +327,21 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, qu
 		// Establish which handler is invoked
 		handler, ok := queue.Handlers.get(deliveryInfo.RoutingKey)
 		if !ok {
-			_ = delivery.Reject(false)
 			EventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
+			_ = delivery.Reject(false)
 			continue
 		}
 
 		uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
-		tracingCtx := extractToContext(delivery.Headers)
-		if err := handler(tracingCtx, uevt); err != nil {
+		if err := handler(handlerCtx, uevt); err != nil {
 			elapsed := time.Since(startTime).Milliseconds()
 			notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
 			if errors.Is(err, ErrParseJSON) {
 				EventNotParsable(queue.Name, deliveryInfo.RoutingKey)
 				_ = delivery.Nack(false, false)
+			} else if errors.Is(err, ErrNoMessageTypeForRouteKey) {
+				EventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
+				_ = delivery.Reject(false)
 			} else {
 				_ = delivery.Nack(false, true)
 			}
@@ -349,7 +353,6 @@ func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, qu
 		notifyEventHandlerSucceed(c.notificationCh, deliveryInfo.RoutingKey, elapsed)
 		_ = delivery.Ack(false)
 		EventAck(queue.Name, deliveryInfo.RoutingKey, elapsed)
-
 	}
 }
 
