@@ -115,8 +115,8 @@ func (s *ShippingService) Start(ctx context.Context) error {
 	return s.connection.Start(ctx,
 		goamqp.WithTypeMapping("Order.Created", OrderCreated{}),
 		goamqp.WithTypeMapping("Order.Updated", OrderUpdated{}),
-		goamqp.EventStreamConsumer("#", goamqp.WithTypeMappingHandler(func(ctx context.Context, event any) error {
-			switch event.(type) {
+		goamqp.EventStreamConsumer("#", goamqp.WithTypeMappingHandler(func(ctx context.Context, event goamqp.ConsumableEvent[any]) error {
+			switch event.Payload.(type) {
 			case *OrderCreated:
 				s.output = append(s.output, "Order created")
 			case *OrderUpdated:
