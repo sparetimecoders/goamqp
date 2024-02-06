@@ -23,10 +23,62 @@
 package goamqp
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+type (
+	// Handler is the type definition for a function that is used to handle events that has been mapped with
+	// RoutingKey <-> Type mappings from WithTypeMapping.
+	// If processing fails, an error should be returned and the message will be re-queued
+	Handler func(ctx context.Context, event any) error
+	// EventHandler is the type definition for a function that is used to handle events of a specific type.
+	// If processing fails, an error should be returned and the message will be re-queued
+	EventHandler[T any] func(ctx context.Context, event ConsumableEvent[T]) error
+	// RequestResponseEventHandler is the type definition for a function that is used to handle events of a specific
+	// type and return a response with RequestResponseHandler.
+	// If processing fails, an error should be returned and the message will be re-queued
+	RequestResponseEventHandler[T any, R any] func(ctx context.Context, event ConsumableEvent[T]) (R, error)
+)
+
+func WithTypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
+	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
+		message, exists := routingKeyToTypeFromContext(ctx, event)
+		if !exists {
+			return ErrNoMessageTypeForRouteKey
+		}
+		if err := json.Unmarshal(event.Payload, &message); err != nil {
+			return err
+		}
+		return handler(ctx, message)
+	}
+}
+
+type routingKeyToTypeCtx string
+
+const routingKeyToTypeCtxProperty routingKeyToTypeCtx = "routingKeyToType"
+
+func injectRoutingKeyToTypeContext(ctx context.Context, keyToType RoutingKeyToType) context.Context {
+	return context.WithValue(ctx, routingKeyToTypeCtxProperty, keyToType)
+}
+
+func routingKeyToTypeFromContext[T any](ctx context.Context, event ConsumableEvent[T]) (any, bool) {
+	routingKey := event.DeliveryInfo.RoutingKey
+	keyToType, ok := ctx.Value(routingKeyToTypeCtxProperty).(RoutingKeyToType)
+	if !ok {
+		return nil, false
+	}
+
+	typ, exists := keyToType[routingKey]
+	if !exists {
+		return nil, false
+	}
+	return reflect.New(typ).Interface(), true
+}
 
 // EventStreamConsumer sets up ap a durable, persistent event stream consumer.
 // For a transient queue, use the TransientEventStreamConsumer function instead.
