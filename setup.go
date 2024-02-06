@@ -30,6 +30,10 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+type RoutingKeyToType map[string]reflect.Type
+
+type TypeToRoutingKey map[reflect.Type]string
+
 // Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
@@ -47,48 +51,6 @@ func WithTypeMapping(routingKey string, msgType any) Setup {
 		conn.keyToType[routingKey] = typ
 		conn.typeToKey[typ] = routingKey
 		return nil
-	}
-}
-
-//func WithTypeMappingHandler(handler Handler) Setup {
-//	return func(c *Connection) error {
-//		return nil
-//	}
-//}
-/*
-	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
-		routingKey := event.DeliveryInfo.RoutingKey
-		typ, exists := c.keyToType[routingKey]
-		if !exists {
-			return nil
-		}
-		message := reflect.New(typ).Interface()
-		if err := json.Unmarshal(event.Payload, &message); err != nil {
-			return err
-		}
-		if err := handler(ctx, message); err == nil {
-			return nil
-		} else {
-			return err
-		}
-	}
-}
-
-*/
-
-func WithHandler[T any](routingKey string, handler EventHandler[T]) Setup {
-	exchangeName := topicExchangeName(defaultEventExchangeName)
-	return func(c *Connection) error {
-		config := &QueueBindingConfig{
-			routingKey:   routingKey,
-			handler:      newWrappedHandler(handler),
-			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
-			exchangeName: exchangeName,
-			kind:         kindTopic,
-			headers:      amqp.Table{},
-		}
-
-		return c.messageHandlerBindQueueToExchange(config)
 	}
 }
 
