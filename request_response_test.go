@@ -24,6 +24,7 @@ package goamqp
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"runtime"
 	"testing"
@@ -35,8 +36,14 @@ import (
 func Test_RequestResponseHandler(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := RequestResponseHandler("key", func(ctx context.Context, msg ConsumableEvent[Message]) (response any, err error) {
-		return nil, nil
+	type response struct {
+		Value string
+	}
+	expectedResponse := response{
+		Value: "response",
+	}
+	err := RequestResponseHandler("key", func(ctx context.Context, msg ConsumableEvent[Message]) (response, error) {
+		return expectedResponse, nil
 	})(conn)
 	require.NoError(t, err)
 
@@ -54,4 +61,18 @@ func Test_RequestResponseHandler(t *testing.T) {
 
 	handler, _ := conn.queueHandlers.handlers("svc.direct.exchange.request.queue").get("key")
 	require.Equal(t, "github.com/sparetimecoders/goamqp.ServiceRequestConsumer[...].func1", runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name())
+
+	msg, _ := json.Marshal(Message{Ok: true})
+	err = handler(context.TODO(), unmarshalEvent{
+		Metadata: Metadata{},
+		DeliveryInfo: DeliveryInfo{
+			Headers: Headers{headerService: ""},
+		},
+		Payload: msg,
+	})
+	require.NoError(t, err)
+	published := <-channel.Published
+	var resp response
+	require.NoError(t, json.Unmarshal(published.msg.Body, &resp))
+	require.Equal(t, expectedResponse, resp)
 }

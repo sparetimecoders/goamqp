@@ -158,7 +158,6 @@ func Test_Consumer_Setups(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			// TODO require.Equal(t, tt.expectedHandler, conn.queueHandlers)
 		})
 	}
 }
