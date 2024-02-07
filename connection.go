@@ -41,11 +41,10 @@ import (
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
-	started     bool
-	serviceName string
-	amqpUri     amqp.URI
-	connection  amqpConnection
-	// TODO One channel per queue/consumer
+	started        bool
+	serviceName    string
+	amqpUri        amqp.URI
+	connection     amqpConnection
 	channel        AmqpChannel
 	queueHandlers  *queueHandlers
 	typeToKey      TypeToRoutingKey
@@ -118,7 +117,6 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {
 		return ErrAlreadyStarted
 	}
-	// TODO Multiple channels
 	if c.channel == nil {
 		err := c.connectToAmqpURL()
 		if err != nil {
@@ -126,7 +124,6 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 		}
 	}
 
-	// TODO Qos from opt (per queue?)
 	if err := c.channel.Qos(20, 0, true); err != nil {
 		return err
 	}
@@ -253,7 +250,6 @@ func (c *Connection) connectToAmqpURL() error {
 	if err != nil {
 		return err
 	}
-	// TODO Multiple channels
 	ch, err := conn.Channel()
 	if err != nil {
 		return err
@@ -341,7 +337,6 @@ func (c *Connection) handleDelivery(handler wrappedHandler, delivery amqp.Delive
 		tracingCtx, span = otel.Tracer("amqp").Start(context.Background(), fmt.Sprintf("%s#%s", deliveryInfo.Queue, delivery.RoutingKey))
 	}
 	defer span.End()
-	// TODO Copy readonly to context, write test!
 	handlerCtx := injectRoutingKeyToTypeContext(tracingCtx, c.keyToType)
 	startTime := time.Now()
 
@@ -414,7 +409,6 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 
 func (c *Connection) setup() error {
 	for _, queue := range c.queueHandlers.queues() {
-		// TODO one channel per queue
 		consumer, err := consume(c.channel, queue.Name)
 		if err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)

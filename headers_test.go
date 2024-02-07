@@ -25,7 +25,6 @@ package goamqp
 import (
 	"testing"
 
-	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,15 +32,14 @@ func Test_Headers(t *testing.T) {
 	h := Headers{}
 	require.NoError(t, h.validate())
 
-	h = headers(amqp.Table{"valid": ""}, "")
+	h = Headers{"valid": ""}
 	require.NoError(t, h.validate())
 	require.Equal(t, "", h.Get("valid"))
 	require.Nil(t, h.Get("invalid"))
 
-	h = headers(amqp.Table{"valid1": "1", "valid2": "2"}, "key")
+	h = Headers{"valid1": "1", "valid2": "2"}
 	require.Equal(t, "1", h.Get("valid1"))
 	require.Equal(t, "2", h.Get("valid2"))
-	require.Equal(t, "key", h.Get("routing-key"))
 
 	h = map[string]any{headerService: "p"}
 	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
@@ -49,6 +47,6 @@ func Test_Headers(t *testing.T) {
 	h = map[string]any{"": "p"}
 	require.EqualError(t, h.validate(), "empty key not allowed")
 
-	h = headers(amqp.Table{headerService: "peter"}, "")
-	require.Equal(t, h.Get(headerService), "peter")
+	h = Headers{headerService: "aService"}
+	require.Equal(t, h.Get(headerService), "aService")
 }

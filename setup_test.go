@@ -27,7 +27,6 @@ import (
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,16 +83,22 @@ func Test_WithTypeMapping_KeyAlreadyExist(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	err := WithTypeMapping("key", TestMessage{})(conn)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	err = WithTypeMapping("key", TestMessage2{})(conn)
-	assert.EqualError(t, err, "mapping for routing key 'key' already registered to type 'goamqp.TestMessage'")
+	require.EqualError(t, err, "mapping for routing key 'key' already registered to type 'goamqp.TestMessage'")
+
+	err = WithTypeMapping("key", TestMessage{})(conn)
+	require.NoError(t, err)
 }
 
 func Test_WithTypeMapping_TypeAlreadyExist(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	err := WithTypeMapping("key", TestMessage{})(conn)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	err = WithTypeMapping("other", TestMessage{})(conn)
-	assert.EqualError(t, err, "mapping for type 'goamqp.TestMessage' already registered to routing key 'key'")
+	require.EqualError(t, err, "mapping for type 'goamqp.TestMessage' already registered to routing key 'key'")
+
+	err = WithTypeMapping("key", TestMessage{})(conn)
+	require.NoError(t, err)
 }

@@ -79,7 +79,6 @@ func WithNotificationChannel(notificationCh chan<- Notification) Setup {
 	}
 }
 
-// TODO REMOVE and use WithNotificationChannel instead?
 // CloseListener receives a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {
 	return func(c *Connection) error {

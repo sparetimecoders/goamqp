@@ -25,8 +25,6 @@ package goamqp
 import (
 	"errors"
 	"fmt"
-
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // Header represent meta-data  for the message
@@ -67,14 +65,6 @@ func (h Headers) validate() error {
 		}
 	}
 	return nil
-}
-
-func headers(headers amqp.Table, routingKey string) Headers {
-	if headers == nil {
-		headers = make(amqp.Table)
-	}
-	headers["routing-key"] = routingKey
-	return Headers(headers)
 }
 
 var reservedHeaderKeys = []string{headerService}

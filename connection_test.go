@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -566,9 +567,8 @@ func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 	require.EqualValues(t, m.published, i)
 }
 
-/*func TestConnection_TypeMappingHandler(t *testing.T) {
+func TestConnection_TypeMappingHandler(t *testing.T) {
 	type fields struct {
-		typeToKey map[reflect.Type]string
 		keyToType map[string]reflect.Type
 	}
 	type args struct {
@@ -580,7 +580,6 @@ func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 		name    string
 		fields  fields
 		args    args
-		want    any
 		wantErr assert.ErrorAssertionFunc
 	}{
 		{
@@ -590,13 +589,14 @@ func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 				msg: []byte(`{"a":true}`),
 				key: "unknown",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, msg any) error {
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
 						return nil
 					}
 				},
 			},
-			want:    nil,
-			wantErr: assert.NoError,
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorIs(t, err, ErrNoMessageTypeForRouteKey)
+			},
 		},
 		{
 			name: "parse error",
@@ -609,12 +609,11 @@ func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 				msg: []byte(`{"a:}`),
 				key: "known",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, msg any) error {
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
 						return nil
 					}
 				},
 			},
-			want: nil,
 			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
 				return assert.EqualError(t, err, "unexpected end of JSON input")
 			},
@@ -630,13 +629,12 @@ func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 				msg: []byte(`{"a":true}`),
 				key: "known",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, msg any) (response any, err error) {
-						assert.IsType(t, &TestMessage{}, msg)
-						return nil, fmt.Errorf("handler-error")
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
+						assert.IsType(t, &TestMessage{}, event.Payload)
+						return fmt.Errorf("handler-error")
 					}
 				},
 			},
-			want: nil,
 			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
 				return assert.EqualError(t, err, "handler-error")
 			},
@@ -652,33 +650,27 @@ func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 				msg: []byte(`{"a":true}`),
 				key: "known",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, msg any) (response any, err error) {
-						assert.IsType(t, &TestMessage{}, msg)
-						return "OK", nil
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
+						assert.IsType(t, &TestMessage{}, event.Payload)
+						return nil
 					}
 				},
 			},
-			want:    "OK",
 			wantErr: assert.NoError,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &Connection{
-				typeToKey: tt.fields.typeToKey,
-				keyToType: tt.fields.keyToType,
-			}
+			ctx := injectRoutingKeyToTypeContext(context.TODO(), tt.fields.keyToType)
 
-			handler := c.TypeMappingHandler(tt.args.handler(t))
-			res, err := handler(context.TODO(), ConsumableEvent[json.RawMessage]{
+			handler := WithTypeMappingHandler(tt.args.handler(t))
+			err := handler(ctx, ConsumableEvent[json.RawMessage]{
 				Payload:      tt.args.msg,
 				DeliveryInfo: DeliveryInfo{RoutingKey: tt.args.key},
 			})
 			if !tt.wantErr(t, err) {
 				return
 			}
-			assert.Equalf(t, tt.want, res, "TypeMappingHandler()")
 		})
 	}
 }
-*/
