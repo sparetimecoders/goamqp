@@ -42,10 +42,10 @@ type Setup func(conn *Connection) error
 func WithTypeMapping(routingKey string, msgType any) Setup {
 	return func(conn *Connection) error {
 		typ := reflect.TypeOf(msgType)
-		if t, exists := conn.keyToType[routingKey]; exists {
+		if t, exists := conn.keyToType[routingKey]; exists && t != typ {
 			return fmt.Errorf("mapping for routing key '%s' already registered to type '%s'", routingKey, t)
 		}
-		if key, exists := conn.typeToKey[typ]; exists {
+		if key, exists := conn.typeToKey[typ]; exists && key != routingKey {
 			return fmt.Errorf("mapping for type '%s' already registered to routing key '%s'", typ, key)
 		}
 		conn.keyToType[routingKey] = typ

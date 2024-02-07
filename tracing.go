@@ -34,7 +34,6 @@ import (
 func injectToHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
 	carrier := propagation.MapCarrier{}
 	otel.GetTextMapPropagator().Inject(ctx, carrier)
-
 	for k, v := range carrier {
 		headers[k] = v
 	}

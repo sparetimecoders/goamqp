@@ -35,6 +35,8 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
@@ -299,10 +301,10 @@ func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, ex
 		publishing,
 	)
 	if err != nil {
-		EventPublishFailed(exchangeName, routingKey)
+		eventPublishFailed(exchangeName, routingKey)
 		return err
 	}
-	EventPublishSucceed(exchangeName, routingKey)
+	eventPublishSucceed(exchangeName, routingKey)
 	return nil
 }
 
@@ -318,42 +320,52 @@ func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
 
 func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue queueWithHandlers) {
 	for delivery := range deliveries {
-		// TODO Copy readonly to context, write test!
-		handlerCtx := injectRoutingKeyToTypeContext(extractToContext(delivery.Headers), c.keyToType)
-		startTime := time.Now()
 		deliveryInfo := getDeliveryInfo(queue.Name, delivery)
-		EventReceived(queue.Name, deliveryInfo.RoutingKey)
+		eventReceived(queue.Name, deliveryInfo.RoutingKey)
 
 		// Establish which handler is invoked
 		handler, ok := queue.Handlers.get(deliveryInfo.RoutingKey)
 		if !ok {
-			EventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
+			eventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
 			_ = delivery.Reject(false)
 			continue
 		}
-
-		uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
-		if err := handler(handlerCtx, uevt); err != nil {
-			elapsed := time.Since(startTime).Milliseconds()
-			notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
-			if errors.Is(err, ErrParseJSON) {
-				EventNotParsable(queue.Name, deliveryInfo.RoutingKey)
-				_ = delivery.Nack(false, false)
-			} else if errors.Is(err, ErrNoMessageTypeForRouteKey) {
-				EventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
-				_ = delivery.Reject(false)
-			} else {
-				_ = delivery.Nack(false, true)
-			}
-			EventNack(queue.Name, deliveryInfo.RoutingKey, elapsed)
-			continue
-		}
-
-		elapsed := time.Since(startTime).Milliseconds()
-		notifyEventHandlerSucceed(c.notificationCh, deliveryInfo.RoutingKey, elapsed)
-		_ = delivery.Ack(false)
-		EventAck(queue.Name, deliveryInfo.RoutingKey, elapsed)
+		c.handleDelivery(handler, delivery, deliveryInfo)
 	}
+}
+
+func (c *Connection) handleDelivery(handler wrappedHandler, delivery amqp.Delivery, deliveryInfo DeliveryInfo) {
+	tracingCtx := extractToContext(delivery.Headers)
+	span := trace.SpanFromContext(tracingCtx)
+	if !span.SpanContext().IsValid() {
+		tracingCtx, span = otel.Tracer("amqp").Start(context.Background(), fmt.Sprintf("%s#%s", deliveryInfo.Queue, delivery.RoutingKey))
+	}
+	defer span.End()
+	// TODO Copy readonly to context, write test!
+	handlerCtx := injectRoutingKeyToTypeContext(tracingCtx, c.keyToType)
+	startTime := time.Now()
+
+	uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
+	if err := handler(handlerCtx, uevt); err != nil {
+		elapsed := time.Since(startTime).Milliseconds()
+		notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
+		if errors.Is(err, ErrParseJSON) {
+			eventNotParsable(deliveryInfo.Queue, deliveryInfo.RoutingKey)
+			_ = delivery.Nack(false, false)
+		} else if errors.Is(err, ErrNoMessageTypeForRouteKey) {
+			eventWithoutHandler(deliveryInfo.Queue, deliveryInfo.RoutingKey)
+			_ = delivery.Reject(false)
+		} else {
+			_ = delivery.Nack(false, true)
+		}
+		eventNack(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
+		return
+	}
+
+	elapsed := time.Since(startTime).Milliseconds()
+	notifyEventHandlerSucceed(c.notificationCh, deliveryInfo.RoutingKey, elapsed)
+	_ = delivery.Ack(false)
+	eventAck(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
 }
 
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
