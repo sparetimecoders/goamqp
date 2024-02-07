@@ -56,7 +56,6 @@ func (suite *IntegrationTestSuite) Test_Tracing() {
 	otel.SetTracerProvider(tracesdk.NewTracerProvider())
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	publishingContext, _ := otel.Tracer("amqp").Start(context.Background(), "publish-test")
-
 	err := publish.Publish(publishingContext, Test{Test: "value"})
 	require.NoError(suite.T(), err)
 	<-closer
