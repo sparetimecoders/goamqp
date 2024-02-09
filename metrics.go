@@ -29,10 +29,10 @@ import (
 )
 
 const (
-	queue      = "queue"
-	exchange   = "exchange"
-	result     = "result"
-	routingKey = "routing_key"
+	metricQueue      = "queue"
+	metricExchange   = "exchange"
+	metricResult     = "result"
+	metricRoutingKey = "routing_key"
 )
 
 var (
@@ -40,35 +40,35 @@ var (
 		prometheus.CounterOpts{
 			Name: "amqp_events_received",
 			Help: "Count of AMQP events received",
-		}, []string{queue, routingKey},
+		}, []string{metricQueue, metricRoutingKey},
 	)
 
 	eventWithoutHandlerCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "amqp_events_without_handler",
 			Help: "Count of AMQP events without a handler",
-		}, []string{queue, routingKey},
+		}, []string{metricQueue, metricRoutingKey},
 	)
 
 	eventNotParsableCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "amqp_events_not_parsable",
 			Help: "Count of AMQP events that could not be parsed",
-		}, []string{queue, routingKey},
+		}, []string{metricQueue, metricRoutingKey},
 	)
 
 	eventNackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "amqp_events_nack",
 			Help: "Count of AMQP events that were not acknowledged",
-		}, []string{queue, routingKey},
+		}, []string{metricQueue, metricRoutingKey},
 	)
 
 	eventAckCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "amqp_events_ack",
 			Help: "Count of AMQP events that were acknowledged",
-		}, []string{queue, routingKey},
+		}, []string{metricQueue, metricRoutingKey},
 	)
 
 	eventProcessedDuration = prometheus.NewHistogramVec(
@@ -76,21 +76,21 @@ var (
 			Name:    "amqp_events_processed_duration",
 			Help:    "Milliseconds taken to process an event",
 			Buckets: []float64{100, 200, 500, 1000, 3000, 5000, 10000},
-		}, []string{queue, routingKey, result},
+		}, []string{metricQueue, metricRoutingKey, metricResult},
 	)
 
 	eventPublishSucceedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "amqp_events_publish_succeed",
 			Help: "Count of AMQP events that could be published successfully",
-		}, []string{exchange, routingKey},
+		}, []string{metricExchange, metricRoutingKey},
 	)
 
 	eventPublishFailedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "amqp_events_publish_failed",
 			Help: "Count of AMQP events that could not be published",
-		}, []string{exchange, routingKey},
+		}, []string{metricExchange, metricRoutingKey},
 	)
 )
 
