@@ -41,7 +41,7 @@ import (
 
 var (
 	serverServiceName = "server"
-	amqpURL           = "amqp://user:password@localhost:5672/test"
+	amqpURL           = "amqp://user:password@localhost:5672"
 )
 
 type IntegrationTestSuite struct {
