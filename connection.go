@@ -196,6 +196,10 @@ func consume(channel AmqpChannel, queue string) (<-chan amqp.Delivery, error) {
 	return channel.Consume(queue, "", false, false, false, false, nil)
 }
 
+func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
+	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
+}
+
 func queueDeclare(channel AmqpChannel, name string, transient bool) error {
 	_, err := channel.QueueDeclare(name, !transient, transient, false, false, queueDeclareExpiration)
 	return err
@@ -234,10 +238,6 @@ func (c *Connection) connectToAmqpURL() error {
 	c.channel = ch
 	c.connection = conn
 	return nil
-}
-
-func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
-	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
 }
 
 func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
@@ -334,7 +334,7 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) 
 		return err
 	}
 
-	if err := c.exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
+	if err := exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
 		return err
 	}
 	if err := queueDeclare(c.channel, cfg.queueName, cfg.transient); err != nil {

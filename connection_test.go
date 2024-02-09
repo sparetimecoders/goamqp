@@ -258,9 +258,7 @@ func Test_TransientQueueDeclare(t *testing.T) {
 func Test_ExchangeDeclare(t *testing.T) {
 	channel := NewMockAmqpChannel()
 
-	conn := mockConnection(channel)
-
-	err := conn.exchangeDeclare(channel, "name", "topic")
+	err := exchangeDeclare(channel, "name", "topic")
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
 	require.Equal(t, ExchangeDeclaration{name: "name", kind: "topic", durable: true, autoDelete: false, noWait: false, args: nil}, channel.ExchangeDeclarations[0])
