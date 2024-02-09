@@ -13,12 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     services:
       rabbitmq:
-        image: rabbitmq
+        image: rabbitmq:management
         env:
           RABBITMQ_DEFAULT_USER: user
           RABBITMQ_DEFAULT_PASS: password
         ports:
           - 5672:5672
+          - 15672:15672
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

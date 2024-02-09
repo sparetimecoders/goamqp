@@ -31,7 +31,7 @@ import (
 	"github.com/sparetimecoders/goamqp"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672/test"
+var amqpURL = "amqp://user:password@localhost:5672"
 
 func Example_request_response() {
 	ctx := context.Background()

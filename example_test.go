@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672/"
+var amqpURL = "amqp://user:password@localhost:5672"
 
 func Example() {
 	ctx := context.Background()
