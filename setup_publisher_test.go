@@ -212,3 +212,8 @@ func Test_Publisher_Setups(t *testing.T) {
 		})
 	}
 }
+
+func Test_InvalidHeader(t *testing.T) {
+	err := (&Publisher{}).setup(nil, "", "", nil, Header{Key: "", Value: ""})
+	require.ErrorIs(t, err, ErrEmptyHeaderKey)
+}

@@ -24,11 +24,15 @@ package goamqp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,7 +48,6 @@ func Test_Consumer_Setups(t *testing.T) {
 		expectedQueues    []QueueDeclaration
 		expectedBindings  []BindingDeclaration
 		expectedConsumer  []Consumer
-		expectedHandler   *queueHandlers
 	}{
 		{
 			name: "EventStreamConsumer",
@@ -95,9 +98,6 @@ func Test_Consumer_Setups(t *testing.T) {
 			expectedQueues:    []QueueDeclaration{{name: "targetService.headers.exchange.response.queue.svc", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}},
 			expectedBindings:  []BindingDeclaration{{queue: "targetService.headers.exchange.response.queue.svc", noWait: false, exchange: "targetService.headers.exchange.response", key: "key", args: amqp.Table{headerService: "svc"}}},
 			expectedConsumer:  []Consumer{{queue: "targetService.headers.exchange.response.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
-			expectedHandler: &queueHandlers{"targetService.headers.exchange.response.queue.svc": &handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
-				return nil
-			}}},
 		},
 		{
 			name: "TransientEventStreamConsumer",
@@ -108,9 +108,6 @@ func Test_Consumer_Setups(t *testing.T) {
 			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}},
 			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
-			expectedHandler: &queueHandlers{"events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f": &handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
-				return nil
-			}}},
 		},
 		{
 			name: "routing key already exists",
@@ -157,6 +154,139 @@ func Test_Consumer_Setups(t *testing.T) {
 				require.ErrorContains(t, err, tt.expectedError)
 			} else {
 				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func Test_MappingsInContext(t *testing.T) {
+	mappings := routingKeyToType{
+		"string": reflect.TypeOf(""),
+		"double": reflect.TypeOf(1.0),
+	}
+	rootCtx := context.TODO()
+	ctx := injectRoutingKeyToTypeContext(rootCtx, mappings)
+	instance, ok := routingKeyToTypeFromContext(ctx, ConsumableEvent[any]{
+		DeliveryInfo: DeliveryInfo{RoutingKey: "string"},
+	})
+	require.True(t, ok)
+	require.IsType(t, reflect.TypeOf(instance), reflect.TypeOf(""))
+
+	_, ok = routingKeyToTypeFromContext(ctx, ConsumableEvent[any]{
+		DeliveryInfo: DeliveryInfo{RoutingKey: "int"},
+	})
+	require.False(t, ok)
+
+	// This should always fail
+	_, ok = routingKeyToTypeFromContext(rootCtx, ConsumableEvent[any]{
+		DeliveryInfo: DeliveryInfo{RoutingKey: "string"},
+	})
+	require.False(t, ok)
+}
+
+func Test_TypeMappingHandler(t *testing.T) {
+	type fields struct {
+		keyToType map[string]reflect.Type
+	}
+	type args struct {
+		handler func(t *testing.T) Handler
+		msg     json.RawMessage
+		key     string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name:   "no mapped type, ignored",
+			fields: fields{},
+			args: args{
+				msg: []byte(`{"a":true}`),
+				key: "unknown",
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
+						return nil
+					}
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.ErrorIs(t, err, ErrNoMessageTypeForRouteKey)
+			},
+		},
+		{
+			name: "parse error",
+			fields: fields{
+				keyToType: map[string]reflect.Type{
+					"known": reflect.TypeOf(TestMessage{}),
+				},
+			},
+			args: args{
+				msg: []byte(`{"a:}`),
+				key: "known",
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
+						return nil
+					}
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.EqualError(t, err, "unexpected end of JSON input")
+			},
+		},
+		{
+			name: "handler error",
+			fields: fields{
+				keyToType: map[string]reflect.Type{
+					"known": reflect.TypeOf(TestMessage{}),
+				},
+			},
+			args: args{
+				msg: []byte(`{"a":true}`),
+				key: "known",
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
+						assert.IsType(t, &TestMessage{}, event.Payload)
+						return fmt.Errorf("handler-error")
+					}
+				},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				return assert.EqualError(t, err, "handler-error")
+			},
+		},
+		{
+			name: "success",
+			fields: fields{
+				keyToType: map[string]reflect.Type{
+					"known": reflect.TypeOf(TestMessage{}),
+				},
+			},
+			args: args{
+				msg: []byte(`{"a":true}`),
+				key: "known",
+				handler: func(t *testing.T) Handler {
+					return func(ctx context.Context, event ConsumableEvent[any]) error {
+						assert.IsType(t, &TestMessage{}, event.Payload)
+						return nil
+					}
+				},
+			},
+			wantErr: assert.NoError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := injectRoutingKeyToTypeContext(context.TODO(), tt.fields.keyToType)
+
+			handler := TypeMappingHandler(tt.args.handler(t))
+			err := handler(ctx, ConsumableEvent[json.RawMessage]{
+				Payload:      tt.args.msg,
+				DeliveryInfo: DeliveryInfo{RoutingKey: tt.args.key},
+			})
+			if !tt.wantErr(t, err) {
+				return
 			}
 		})
 	}
