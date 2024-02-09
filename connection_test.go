@@ -334,25 +334,6 @@ func TestResponseWrapper(t *testing.T) {
 	}
 }
 
-func Test_messageHandlerBindQueueToExchange(t *testing.T) {
-	e := errors.New("failed to create queue")
-	channel := &MockAmqpChannel{
-		QueueDeclarationError: &e,
-	}
-	conn := mockConnection(channel)
-
-	cfg := &QueueBindingConfig{
-		routingKey:   "routingkey",
-		handler:      nil,
-		queueName:    "queue",
-		exchangeName: "exchange",
-		kind:         kindDirect,
-		headers:      nil,
-	}
-	err := conn.messageHandlerBindQueueToExchange(cfg)
-	require.EqualError(t, err, "failed to create queue")
-}
-
 func Test_Publisher_ReservedHeader(t *testing.T) {
 	p := NewPublisher()
 	err := p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})

@@ -18,16 +18,14 @@ type queueConsumer struct {
 	notificationCh   chan<- Notification
 }
 
-func (c *queueConsumer) consume(channel AmqpChannel, routingKeyToType routingKeyToType, notificationCh chan<- Notification) error {
-	deliveries, err := channel.Consume(c.queue, "", false, false, false, false, nil)
-	if err != nil {
-		return err
-	}
+func (c *queueConsumer) consume(channel AmqpChannel, routingKeyToType routingKeyToType, notificationCh chan<- Notification) (<-chan amqp.Delivery, error) {
 	c.routingKeyToType = routingKeyToType
 	c.notificationCh = notificationCh
-	go c.loop(deliveries)
-
-	return nil
+	deliveries, err := channel.Consume(c.queue, "", false, false, false, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return deliveries, nil
 }
 
 func (c *queueConsumer) loop(deliveries <-chan amqp.Delivery) {
@@ -103,4 +101,14 @@ func (c *queueConsumers) add(queueName, routingKey string, handler wrappedHandle
 	}
 	consumerForQueue.handlers.add(routingKey, handler)
 	return nil
+}
+
+func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
+	deliveryInfo := DeliveryInfo{
+		Queue:      queueName,
+		Exchange:   delivery.Exchange,
+		RoutingKey: delivery.RoutingKey,
+		Headers:    Headers(delivery.Headers),
+	}
+	return deliveryInfo
 }
