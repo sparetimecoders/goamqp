@@ -177,22 +177,8 @@ func (c *Connection) connectToAmqpURL() error {
 	return nil
 }
 
-func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
-	return c.queueConsumers.add(queueName, routingKey, handler)
-}
-
-func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
-	deliveryInfo := DeliveryInfo{
-		Queue:      queueName,
-		Exchange:   delivery.Exchange,
-		RoutingKey: delivery.RoutingKey,
-		Headers:    Headers(delivery.Headers),
-	}
-	return deliveryInfo
-}
-
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
-	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.handler); err != nil {
+	if err := c.queueConsumers.add(cfg.queueName, cfg.routingKey, cfg.handler); err != nil {
 		return err
 	}
 
@@ -246,8 +232,10 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 
 func (c *Connection) setup() error {
 	for _, consumer := range *c.queueConsumers {
-		if err := consumer.consume(c.channel, c.keyToType, c.notificationCh); err != nil {
+		if deliveries, err := consumer.consume(c.channel, c.keyToType, c.notificationCh); err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", consumer.queue, err)
+		} else {
+			go consumer.loop(deliveries)
 		}
 	}
 	return nil
