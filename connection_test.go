@@ -28,11 +28,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,9 +47,10 @@ func Test_Start_MultipleCallsFails(t *testing.T) {
 		},
 	}
 	conn := &Connection{
-		serviceName: "test",
-		connection:  mockAmqpConnection,
-		channel:     mockChannel,
+		serviceName:    "test",
+		connection:     mockAmqpConnection,
+		channel:        mockChannel,
+		queueConsumers: &queueConsumers{},
 	}
 	err := conn.Start(context.Background())
 	require.NoError(t, err)
@@ -85,10 +84,10 @@ func Test_Start_SetupFails(t *testing.T) {
 		},
 	}
 	conn := &Connection{
-		serviceName:   "test",
-		connection:    mockAmqpConnection,
-		channel:       mockChannel,
-		queueHandlers: &queueHandlers{},
+		serviceName:    "test",
+		connection:     mockAmqpConnection,
+		channel:        mockChannel,
+		queueConsumers: &queueConsumers{},
 	}
 	err := conn.Start(context.Background(),
 		EventStreamConsumer("test", func(ctx context.Context, msg ConsumableEvent[Message]) error {
@@ -96,34 +95,6 @@ func Test_Start_SetupFails(t *testing.T) {
 		}))
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to create consumer for queue events.topic.exchange.queue.test. error consuming queue")
-}
-
-func Test_Start_WithPrefetchLimit_Resets_Qos(t *testing.T) {
-	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
-	mockChannel := &MockAmqpChannel{
-		qosFn: func(cc int) func(prefetchCount, prefetchSize int, global bool) error {
-			return func(prefetchCount, prefetchSize int, global bool) error {
-				defer func() {
-					cc++
-				}()
-				if cc == 0 {
-					require.Equal(t, 20, prefetchCount)
-				} else {
-					require.Equal(t, 1, prefetchCount)
-				}
-				return nil
-			}
-		}(0),
-	}
-	conn := &Connection{
-		serviceName: "test",
-		connection:  mockAmqpConnection,
-		channel:     mockChannel,
-	}
-	err := conn.Start(context.Background(),
-		WithPrefetchLimit(1),
-	)
-	require.NoError(t, err)
 }
 
 func Test_Start_ConnectionFail(t *testing.T) {
@@ -137,18 +108,6 @@ func Test_Start_ConnectionFail(t *testing.T) {
 	err = conn.Start(context.Background())
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to connect")
-}
-
-func Test_Must(t *testing.T) {
-	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
-	require.NotNil(t, conn)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("The code did not panic")
-		}
-	}()
-	_ = Must(NewFromURL("", "invalid"))
 }
 
 func Test_URI(t *testing.T) {
@@ -264,17 +223,6 @@ func Test_ExchangeDeclare(t *testing.T) {
 	require.Equal(t, ExchangeDeclaration{name: "name", kind: "topic", durable: true, autoDelete: false, noWait: false, args: nil}, channel.ExchangeDeclarations[0])
 }
 
-func Test_Consume(t *testing.T) {
-	channel := NewMockAmqpChannel()
-	_, err := consume(channel, "q")
-	require.NoError(t, err)
-	require.Equal(t, 1, len(channel.Consumers))
-	require.Equal(t, Consumer{
-		queue:    "q",
-		consumer: "", autoAck: false, exclusive: false, noLocal: false, noWait: false, args: nil,
-	}, channel.Consumers[0])
-}
-
 func Test_Publish(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	headers := amqp.Table{}
@@ -386,43 +334,6 @@ func TestResponseWrapper(t *testing.T) {
 	}
 }
 
-func Test_DivertToMessageHandler(t *testing.T) {
-	acker := MockAcknowledger{
-		Acks:    make(chan Ack, 4),
-		Nacks:   make(chan Nack, 1),
-		Rejects: make(chan Reject, 1),
-	}
-	channel := MockAmqpChannel{Published: make(chan Publish, 1)}
-
-	handlers := queueHandlers{}
-	handler := newWrappedHandler(func(ctx context.Context, msg ConsumableEvent[Message]) error {
-		if msg.Payload.Ok {
-			return nil
-		}
-		return errors.New("failed")
-	})
-	require.NoError(t, handlers.add("q", "key1", handler))
-	require.NoError(t, handlers.add("q", "key2", handler))
-
-	queueDeliveries := make(chan amqp.Delivery, 6)
-
-	queueDeliveries <- delivery(acker, "key1", true)
-	queueDeliveries <- delivery(acker, "key2", true)
-	queueDeliveries <- delivery(acker, "key2", false)
-	queueDeliveries <- delivery(acker, "missing", true)
-	close(queueDeliveries)
-
-	c := Connection{
-		started: true,
-		channel: &channel,
-	}
-	c.divertToMessageHandlers(queueDeliveries, handlers.queues()[0])
-
-	require.Equal(t, 1, len(acker.Rejects))
-	require.Equal(t, 1, len(acker.Nacks))
-	require.Equal(t, 2, len(acker.Acks))
-}
-
 func Test_messageHandlerBindQueueToExchange(t *testing.T) {
 	e := errors.New("failed to create queue")
 	channel := &MockAmqpChannel{
@@ -442,91 +353,10 @@ func Test_messageHandlerBindQueueToExchange(t *testing.T) {
 	require.EqualError(t, err, "failed to create queue")
 }
 
-func delivery(acker MockAcknowledger, routingKey string, success bool) amqp.Delivery {
-	body, _ := json.Marshal(Message{success})
-
-	return amqp.Delivery{
-		Body:         body,
-		RoutingKey:   routingKey,
-		Acknowledger: &acker,
-	}
-}
-
-func Test_HandleMessage_Ack_WhenHandled(t *testing.T) {
-	require.Equal(t, Ack{tag: 0x0, multiple: false}, <-testHandleMessage("{}", true).Acks)
-}
-
-func Test_HandleMessage_Nack_WhenUnhandled(t *testing.T) {
-	require.Equal(t, Nack{tag: 0x0, multiple: false, requeue: true}, <-testHandleMessage("{}", false).Nacks)
-}
-
-func Test_HandleMessage_Nack_IfParseFails(t *testing.T) {
-	require.Equal(t, Nack{tag: 0x0, requeue: false}, <-testHandleMessage("", true).Nacks)
-}
-
-func testHandleMessage(json string, handle bool) MockAcknowledger {
-	type Message struct{}
-	acker := NewMockAcknowledger()
-	delivery := amqp.Delivery{
-		Body:         []byte(json),
-		Acknowledger: &acker,
-		RoutingKey:   "key",
-	}
-	c := &Connection{}
-	deliveries := make(chan amqp.Delivery)
-	queue := queueWithHandlers{
-		Name: "",
-		Handlers: &handlers{
-			"key": newWrappedHandler(func(ctx context.Context, msg ConsumableEvent[Message]) error {
-				if handle {
-					return nil
-				}
-				return errors.New("failed")
-			}),
-		},
-	}
-	go func() {
-		deliveries <- delivery
-		close(deliveries)
-	}()
-	c.divertToMessageHandlers(deliveries, queue)
-	return acker
-}
-
-func Test_HandleMessage_RecoverableError(t *testing.T) {
-	var logged bool
-	type Message struct{}
-	acker := NewMockAcknowledger()
-	delivery := amqp.Delivery{
-		Body:         []byte("{}"),
-		Acknowledger: &acker,
-	}
-	c := &Connection{
-		messageLogger: noOpMessageLogger(),
-		errorLog: func(s string) {
-			logged = true
-		},
-	}
-	c.handleMessage(delivery, func(i any, headers Headers) (any, error) {
-		return nil, fmt.Errorf("error: %w", ErrRecoverable)
-	}, reflect.TypeOf(Message{}))
-	require.False(t, logged)
-}
-
 func Test_Publisher_ReservedHeader(t *testing.T) {
 	p := NewPublisher()
 	err := p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})
 	require.EqualError(t, err, "reserved key service used, please change to use another one")
-}
-
-func TestEmptyQueueNameSuffix(t *testing.T) {
-	require.EqualError(t, AddQueueNameSuffix("")(&QueueBindingConfig{}), ErrEmptySuffix.Error())
-}
-
-func TestQueueNameSuffix(t *testing.T) {
-	cfg := &QueueBindingConfig{queueName: "queue"}
-	require.NoError(t, AddQueueNameSuffix("suffix")(cfg))
-	require.Equal(t, "queue-suffix", cfg.queueName)
 }
 
 type Message struct {
@@ -548,112 +378,4 @@ func (m *mockPublisher[R]) publish(ctx context.Context, targetService, routingKe
 
 func (m *mockPublisher[R]) checkPublished(t *testing.T, i R) {
 	require.EqualValues(t, m.published, i)
-}
-
-func TestConnection_TypeMappingHandler(t *testing.T) {
-	type fields struct {
-		keyToType map[string]reflect.Type
-	}
-	type args struct {
-		handler func(t *testing.T) Handler
-		msg     json.RawMessage
-		key     string
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr assert.ErrorAssertionFunc
-	}{
-		{
-			name:   "no mapped type, ignored",
-			fields: fields{},
-			args: args{
-				msg: []byte(`{"a":true}`),
-				key: "unknown",
-				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
-						return nil
-					}
-				},
-			},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.ErrorIs(t, err, ErrNoMessageTypeForRouteKey)
-			},
-		},
-		{
-			name: "parse error",
-			fields: fields{
-				keyToType: map[string]reflect.Type{
-					"known": reflect.TypeOf(TestMessage{}),
-				},
-			},
-			args: args{
-				msg: []byte(`{"a:}`),
-				key: "known",
-				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
-						return nil
-					}
-				},
-			},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.EqualError(t, err, "unexpected end of JSON input")
-			},
-		},
-		{
-			name: "handler error",
-			fields: fields{
-				keyToType: map[string]reflect.Type{
-					"known": reflect.TypeOf(TestMessage{}),
-				},
-			},
-			args: args{
-				msg: []byte(`{"a":true}`),
-				key: "known",
-				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
-						assert.IsType(t, &TestMessage{}, event.Payload)
-						return fmt.Errorf("handler-error")
-					}
-				},
-			},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.EqualError(t, err, "handler-error")
-			},
-		},
-		{
-			name: "success",
-			fields: fields{
-				keyToType: map[string]reflect.Type{
-					"known": reflect.TypeOf(TestMessage{}),
-				},
-			},
-			args: args{
-				msg: []byte(`{"a":true}`),
-				key: "known",
-				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
-						assert.IsType(t, &TestMessage{}, event.Payload)
-						return nil
-					}
-				},
-			},
-			wantErr: assert.NoError,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := injectRoutingKeyToTypeContext(context.TODO(), tt.fields.keyToType)
-
-			handler := TypeMappingHandler(tt.args.handler(t))
-			err := handler(ctx, ConsumableEvent[json.RawMessage]{
-				Payload:      tt.args.msg,
-				DeliveryInfo: DeliveryInfo{RoutingKey: tt.args.key},
-			})
-			if !tt.wantErr(t, err) {
-				return
-			}
-		})
-	}
 }

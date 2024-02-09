@@ -35,4 +35,4 @@ repos:
         - --comment-style
         - //                           # defaults to:  #
         - --use-current-year
-        - --no-extra-eol                # see below
+        - --no-extra-eol

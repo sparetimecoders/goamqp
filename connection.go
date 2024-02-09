@@ -24,7 +24,6 @@ package goamqp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,8 +32,6 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
@@ -44,9 +41,9 @@ type Connection struct {
 	amqpUri        amqp.URI
 	connection     amqpConnection
 	channel        AmqpChannel
-	queueHandlers  *queueHandlers
-	typeToKey      TypeToRoutingKey
-	keyToType      RoutingKeyToType
+	queueConsumers *queueConsumers
+	typeToKey      typeToRoutingKey
+	keyToType      routingKeyToType
 	notificationCh chan<- Notification
 }
 
@@ -145,10 +142,6 @@ func version() string {
 	return "_unknown_"
 }
 
-func consume(channel AmqpChannel, queue string) (<-chan amqp.Delivery, error) {
-	return channel.Consume(queue, "", false, false, false, false, nil)
-}
-
 func amqpConfig(serviceName string) amqp.Config {
 	config := amqp.Config{
 		Properties: amqp.NewConnectionProperties(),
@@ -185,7 +178,7 @@ func (c *Connection) connectToAmqpURL() error {
 }
 
 func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
-	return c.queueHandlers.add(queueName, routingKey, handler)
+	return c.queueConsumers.add(queueName, routingKey, handler)
 }
 
 func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
@@ -196,55 +189,6 @@ func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
 		Headers:    Headers(delivery.Headers),
 	}
 	return deliveryInfo
-}
-
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, queue queueWithHandlers) {
-	for delivery := range deliveries {
-		deliveryInfo := getDeliveryInfo(queue.Name, delivery)
-		eventReceived(queue.Name, deliveryInfo.RoutingKey)
-
-		// Establish which handler is invoked
-		handler, ok := queue.Handlers.get(deliveryInfo.RoutingKey)
-		if !ok {
-			eventWithoutHandler(queue.Name, deliveryInfo.RoutingKey)
-			_ = delivery.Reject(false)
-			continue
-		}
-		c.handleDelivery(handler, delivery, deliveryInfo)
-	}
-}
-
-func (c *Connection) handleDelivery(handler wrappedHandler, delivery amqp.Delivery, deliveryInfo DeliveryInfo) {
-	tracingCtx := extractToContext(delivery.Headers)
-	span := trace.SpanFromContext(tracingCtx)
-	if !span.SpanContext().IsValid() {
-		tracingCtx, span = otel.Tracer("amqp").Start(context.Background(), fmt.Sprintf("%s#%s", deliveryInfo.Queue, delivery.RoutingKey))
-	}
-	defer span.End()
-	handlerCtx := injectRoutingKeyToTypeContext(tracingCtx, c.keyToType)
-	startTime := time.Now()
-
-	uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
-	if err := handler(handlerCtx, uevt); err != nil {
-		elapsed := time.Since(startTime).Milliseconds()
-		notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
-		if errors.Is(err, ErrParseJSON) {
-			eventNotParsable(deliveryInfo.Queue, deliveryInfo.RoutingKey)
-			_ = delivery.Nack(false, false)
-		} else if errors.Is(err, ErrNoMessageTypeForRouteKey) {
-			eventWithoutHandler(deliveryInfo.Queue, deliveryInfo.RoutingKey)
-			_ = delivery.Reject(false)
-		} else {
-			eventNack(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
-			_ = delivery.Nack(false, true)
-		}
-		return
-	}
-
-	elapsed := time.Since(startTime).Milliseconds()
-	notifyEventHandlerSucceed(c.notificationCh, deliveryInfo.RoutingKey, elapsed)
-	_ = delivery.Ack(false)
-	eventAck(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
 }
 
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
@@ -292,21 +236,23 @@ var (
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
-		serviceName:   serviceName,
-		amqpUri:       uri,
-		queueHandlers: &queueHandlers{},
-		keyToType:     make(map[string]reflect.Type),
-		typeToKey:     make(map[reflect.Type]string),
+		serviceName:    serviceName,
+		amqpUri:        uri,
+		queueConsumers: &queueConsumers{},
+		keyToType:      make(map[string]reflect.Type),
+		typeToKey:      make(map[reflect.Type]string),
 	}
 }
 
 func (c *Connection) setup() error {
-	for _, queue := range c.queueHandlers.queues() {
-		consumer, err := consume(c.channel, queue.Name)
-		if err != nil {
-			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)
+	for _, consumer := range *c.queueConsumers {
+		if err := consumer.consume(c.channel, c.keyToType, c.notificationCh); err != nil {
+			return fmt.Errorf("failed to create consumer for queue %s. %v", consumer.queue, err)
 		}
-		go c.divertToMessageHandlers(consumer, queue)
 	}
 	return nil
 }
+
+type routingKeyToType map[string]reflect.Type
+
+type typeToRoutingKey map[reflect.Type]string
