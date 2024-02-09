@@ -82,7 +82,7 @@ func EventStreamPublisher(publisher *Publisher) Setup {
 func StreamPublisher(exchange string, publisher *Publisher) Setup {
 	name := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		if err := c.exchangeDeclare(c.channel, name, kindTopic); err != nil {
+		if err := exchangeDeclare(c.channel, name, kindTopic); err != nil {
 			return fmt.Errorf("failed to declare exchange %s, %w", name, err)
 		}
 		publisher.connection = c
@@ -119,7 +119,7 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 			return err
 		}
 		publisher.exchange = reqExchangeName
-		if err := c.exchangeDeclare(c.channel, reqExchangeName, kindDirect); err != nil {
+		if err := exchangeDeclare(c.channel, reqExchangeName, kindDirect); err != nil {
 			return err
 		}
 		return nil
