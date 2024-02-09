@@ -279,10 +279,7 @@ func Test_Publish(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	headers := amqp.Table{}
 	headers["key"] = "value"
-	c := Connection{
-		channel: channel,
-	}
-	err := c.publishMessage(context.Background(), Message{true}, "key", "exchange", headers)
+	err := publishMessage(context.Background(), channel, Message{true}, "key", "exchange", headers)
 	require.NoError(t, err)
 
 	publish := <-channel.Published
@@ -314,10 +311,7 @@ func Test_Publish_Marshal_Error(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	headers := amqp.Table{}
 	headers["key"] = "value"
-	c := Connection{
-		channel: channel,
-	}
-	err := c.publishMessage(context.Background(), math.Inf(1), "key", "exchange", headers)
+	err := publishMessage(context.Background(), channel, math.Inf(1), "key", "exchange", headers)
 	require.EqualError(t, err, "json: unsupported value: +Inf")
 }
 

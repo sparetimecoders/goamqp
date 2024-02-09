@@ -24,6 +24,7 @@ package goamqp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -32,7 +33,8 @@ import (
 
 // Publisher is used to send messages
 type Publisher struct {
-	connection     *Connection
+	typeToKey      TypeToRoutingKey
+	channel        AmqpChannel
 	exchange       string
 	defaultHeaders []Header
 }
@@ -67,8 +69,8 @@ func (p *Publisher) Publish(ctx context.Context, msg any, headers ...Header) err
 	if t.Kind() == reflect.Ptr {
 		key = t.Elem()
 	}
-	if key, ok := p.connection.typeToKey[key]; ok {
-		return p.connection.publishMessage(ctx, msg, key, p.exchange, table)
+	if key, ok := p.typeToKey[key]; ok {
+		return publishMessage(ctx, p.channel, msg, key, p.exchange, table)
 	}
 	return fmt.Errorf("%w %s", ErrNoRouteForMessageType, t)
 }
@@ -85,7 +87,8 @@ func StreamPublisher(exchange string, publisher *Publisher) Setup {
 		if err := exchangeDeclare(c.channel, name, kindTopic); err != nil {
 			return fmt.Errorf("failed to declare exchange %s, %w", name, err)
 		}
-		publisher.connection = c
+		publisher.channel = c.channel
+		publisher.typeToKey = c.typeToKey
 		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
 			return err
 		}
@@ -99,7 +102,8 @@ func StreamPublisher(exchange string, publisher *Publisher) Setup {
 // https://www.rabbitmq.com/sender-selected.html#:~:text=The%20RabbitMQ%20broker%20treats%20the,key%20if%20they%20are%20present.
 func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 	return func(c *Connection) error {
-		publisher.connection = c
+		publisher.channel = c.channel
+		publisher.typeToKey = c.typeToKey
 		if err := publisher.setDefaultHeaders(c.serviceName,
 			Header{Key: "CC", Value: []any{destinationQueueName}},
 		); err != nil {
@@ -114,7 +118,8 @@ func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 func ServicePublisher(targetService string, publisher *Publisher) Setup {
 	return func(c *Connection) error {
 		reqExchangeName := serviceRequestExchangeName(targetService)
-		publisher.connection = c
+		publisher.channel = c.channel
+		publisher.typeToKey = c.typeToKey
 		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
 			return err
 		}
@@ -133,5 +138,31 @@ func (p *Publisher) setDefaultHeaders(serviceName string, headers ...Header) err
 		}
 	}
 	p.defaultHeaders = append(headers, Header{Key: headerService, Value: serviceName})
+	return nil
+}
+
+func publishMessage(ctx context.Context, channel AmqpChannel, msg any, routingKey, exchangeName string, headers amqp.Table) error {
+	jsonBytes, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	publishing := amqp.Publishing{
+		Body:         jsonBytes,
+		ContentType:  contentType,
+		DeliveryMode: 2,
+		Headers:      injectToHeaders(ctx, headers),
+	}
+	err = channel.PublishWithContext(ctx, exchangeName,
+		routingKey,
+		false,
+		false,
+		publishing,
+	)
+	if err != nil {
+		eventPublishFailed(exchangeName, routingKey)
+		return err
+	}
+	eventPublishSucceed(exchangeName, routingKey)
 	return nil
 }
