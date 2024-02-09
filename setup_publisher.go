@@ -33,7 +33,7 @@ import (
 
 // Publisher is used to send messages
 type Publisher struct {
-	typeToKey      TypeToRoutingKey
+	typeToKey      typeToRoutingKey
 	channel        AmqpChannel
 	exchange       string
 	defaultHeaders []Header
@@ -82,18 +82,12 @@ func EventStreamPublisher(publisher *Publisher) Setup {
 
 // StreamPublisher sets up an event stream publisher
 func StreamPublisher(exchange string, publisher *Publisher) Setup {
-	name := topicExchangeName(exchange)
+	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		if err := exchangeDeclare(c.channel, name, kindTopic); err != nil {
-			return fmt.Errorf("failed to declare exchange %s, %w", name, err)
+		if err := exchangeDeclare(c.channel, exchangeName, kindTopic); err != nil {
+			return fmt.Errorf("failed to declare exchange %s, %w", exchangeName, err)
 		}
-		publisher.channel = c.channel
-		publisher.typeToKey = c.typeToKey
-		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
-			return err
-		}
-		publisher.exchange = name
-		return nil
+		return publisher.setup(c.channel, c.serviceName, exchangeName, c.typeToKey)
 	}
 }
 
@@ -102,42 +96,31 @@ func StreamPublisher(exchange string, publisher *Publisher) Setup {
 // https://www.rabbitmq.com/sender-selected.html#:~:text=The%20RabbitMQ%20broker%20treats%20the,key%20if%20they%20are%20present.
 func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 	return func(c *Connection) error {
-		publisher.channel = c.channel
-		publisher.typeToKey = c.typeToKey
-		if err := publisher.setDefaultHeaders(c.serviceName,
-			Header{Key: "CC", Value: []any{destinationQueueName}},
-		); err != nil {
-			return err
-		}
-		publisher.exchange = ""
-		return nil
+		return publisher.setup(c.channel, c.serviceName, "", c.typeToKey, Header{Key: "CC", Value: []any{destinationQueueName}})
 	}
 }
 
 // ServicePublisher sets up ap a publisher, that sends messages to the targetService
 func ServicePublisher(targetService string, publisher *Publisher) Setup {
+	exchangeName := serviceRequestExchangeName(targetService)
 	return func(c *Connection) error {
-		reqExchangeName := serviceRequestExchangeName(targetService)
-		publisher.channel = c.channel
-		publisher.typeToKey = c.typeToKey
-		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
+		if err := exchangeDeclare(c.channel, exchangeName, kindDirect); err != nil {
 			return err
 		}
-		publisher.exchange = reqExchangeName
-		if err := exchangeDeclare(c.channel, reqExchangeName, kindDirect); err != nil {
-			return err
-		}
-		return nil
+		return publisher.setup(c.channel, c.serviceName, exchangeName, c.typeToKey)
 	}
 }
 
-func (p *Publisher) setDefaultHeaders(serviceName string, headers ...Header) error {
+func (p *Publisher) setup(channel AmqpChannel, serviceName, exchange string, typeToKey typeToRoutingKey, headers ...Header) error {
 	for _, h := range headers {
 		if err := h.validateKey(); err != nil {
 			return err
 		}
 	}
 	p.defaultHeaders = append(headers, Header{Key: headerService, Value: serviceName})
+	p.channel = channel
+	p.typeToKey = typeToKey
+	p.exchange = exchange
 	return nil
 }
 
