@@ -113,7 +113,7 @@ func ServiceResponseConsumer[T any](targetService, routingKey string, handler Ev
 func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T]) Setup {
 	return func(c *Connection) error {
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
-		if err := c.exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
+		if err := exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
 			return fmt.Errorf("failed to create exchange %s, %w", resExchangeName, err)
 		}
 
