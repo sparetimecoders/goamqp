@@ -30,7 +30,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"runtime"
 	"runtime/debug"
 	"time"
 
@@ -53,34 +52,7 @@ type Connection struct {
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
-type ServiceResponsePublisher[T any] func(ctx context.Context, targetService, routingKey string, msg T) error
-
-// QueueBindingConfig is a wrapper around the actual amqp queue configuration
-type QueueBindingConfig struct {
-	routingKey   string
-	handler      wrappedHandler
-	queueName    string
-	exchangeName string
-	kind         kind
-	headers      amqp.Table
-	transient    bool
-}
-
-// QueueBindingConfigSetup is a setup function that takes a QueueBindingConfig and provide custom changes to the
-// configuration
-type QueueBindingConfigSetup func(config *QueueBindingConfig) error
-
-// AddQueueNameSuffix appends the provided suffix to the queue name
-// Useful when multiple consumers are needed for a routing key in the same service
-func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
-	return func(config *QueueBindingConfig) error {
-		if suffix == "" {
-			return ErrEmptySuffix
-		}
-		config.queueName = fmt.Sprintf("%s-%s", config.queueName, suffix)
-		return nil
-	}
-}
+type ServiceResponsePublisher[T any] func(ctx context.Context, targetService, routingKey string, event T) error
 
 var (
 	// ErrEmptySuffix returned when an empty suffix is passed
@@ -174,35 +146,8 @@ func version() string {
 	return "_unknown_"
 }
 
-func responseWrapper[T, R any](handler RequestResponseEventHandler[T, R], routingKey string, publisher ServiceResponsePublisher[R]) EventHandler[T] {
-	return func(ctx context.Context, event ConsumableEvent[T]) (err error) {
-		resp, err := handler(ctx, event)
-		if err != nil {
-			return fmt.Errorf("failed to process message, %w", err)
-		}
-		service, err := sendingService(event.DeliveryInfo)
-		if err != nil {
-			return fmt.Errorf("failed to extract service name, %w", err)
-		}
-		err = publisher(ctx, service, routingKey, resp)
-		if err != nil {
-			return fmt.Errorf("failed to publish response, %w", err)
-		}
-		return nil
-	}
-}
-
 func consume(channel AmqpChannel, queue string) (<-chan amqp.Delivery, error) {
 	return channel.Consume(queue, "", false, false, false, false, nil)
-}
-
-func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
-	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
-}
-
-func queueDeclare(channel AmqpChannel, name string, transient bool) error {
-	_, err := channel.QueueDeclare(name, !transient, transient, false, false, queueDeclareExpiration)
-	return err
 }
 
 func amqpConfig(serviceName string) amqp.Config {
@@ -343,6 +288,15 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) 
 	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.headers)
 }
 
+func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
+	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
+}
+
+func queueDeclare(channel AmqpChannel, name string, transient bool) error {
+	_, err := channel.QueueDeclare(name, !transient, transient, false, false, queueDeclareExpiration)
+	return err
+}
+
 type kind string
 
 const (
@@ -382,21 +336,4 @@ func (c *Connection) setup() error {
 		go c.divertToMessageHandlers(consumer, queue)
 	}
 	return nil
-}
-
-// getQueueBindingConfigSetupFuncName returns the name of the QueueBindingConfigSetup function
-func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
-	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
-}
-
-// sendingService returns the name of the service that produced the message
-// Can be used to send a handlerResponse, see PublishServiceResponse
-func sendingService(di DeliveryInfo) (string, error) {
-	if h, exist := di.Headers[headerService]; exist {
-		switch v := h.(type) {
-		case string:
-			return v, nil
-		}
-	}
-	return "", errors.New("no service found")
 }
