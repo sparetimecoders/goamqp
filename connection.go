@@ -63,6 +63,7 @@ type QueueBindingConfig struct {
 	exchangeName string
 	kind         kind
 	headers      amqp.Table
+	transient    bool
 }
 
 // QueueBindingConfigSetup is a setup function that takes a QueueBindingConfig and provide custom changes to the
@@ -192,36 +193,11 @@ func responseWrapper[T, R any](handler RequestResponseEventHandler[T, R], routin
 }
 
 func consume(channel AmqpChannel, queue string) (<-chan amqp.Delivery, error) {
-	return channel.Consume(
-		queue,
-		"",
-		false,
-		false,
-		false,
-		false,
-		amqp.Table{},
-	)
+	return channel.Consume(queue, "", false, false, false, false, nil)
 }
 
-func queueDeclare(channel AmqpChannel, name string) error {
-	_, err := channel.QueueDeclare(name,
-		true,
-		false,
-		false,
-		false,
-		queueDeclareExpiration,
-	)
-	return err
-}
-
-func transientQueueDeclare(channel AmqpChannel, name string) error {
-	_, err := channel.QueueDeclare(name,
-		false,
-		true,
-		true,
-		false,
-		queueDeclareExpiration,
-	)
+func queueDeclare(channel AmqpChannel, name string, transient bool) error {
+	_, err := channel.QueueDeclare(name, !transient, transient, false, false, queueDeclareExpiration)
 	return err
 }
 
@@ -261,17 +237,7 @@ func (c *Connection) connectToAmqpURL() error {
 }
 
 func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
-	args := amqp.Table{}
-
-	return channel.ExchangeDeclare(
-		name,
-		string(kind),
-		true,
-		false,
-		false,
-		false,
-		args,
-	)
+	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
 }
 
 func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
@@ -351,9 +317,9 @@ func (c *Connection) handleDelivery(handler wrappedHandler, delivery amqp.Delive
 			eventWithoutHandler(deliveryInfo.Queue, deliveryInfo.RoutingKey)
 			_ = delivery.Reject(false)
 		} else {
+			eventNack(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
 			_ = delivery.Nack(false, true)
 		}
-		eventNack(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
 		return
 	}
 
@@ -371,7 +337,7 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) 
 	if err := c.exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
 		return err
 	}
-	if err := queueDeclare(c.channel, cfg.queueName); err != nil {
+	if err := queueDeclare(c.channel, cfg.queueName, cfg.transient); err != nil {
 		return err
 	}
 	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.headers)
@@ -416,20 +382,6 @@ func (c *Connection) setup() error {
 		go c.divertToMessageHandlers(consumer, queue)
 	}
 	return nil
-}
-
-func getEventType(eventType any) (eventType, error) {
-	if _, ok := eventType.(reflect.Type); ok {
-		return nil, ErrIllegalEventType
-	}
-	return reflect.TypeOf(eventType), nil
-}
-
-type eventType reflect.Type
-
-// getSetupFuncName returns the name of the Setup function
-func getSetupFuncName(f Setup) string {
-	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
 // getQueueBindingConfigSetupFuncName returns the name of the QueueBindingConfigSetup function

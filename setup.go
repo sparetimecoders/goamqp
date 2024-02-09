@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -101,4 +102,9 @@ func PublishNotify(confirm chan amqp.Confirmation) Setup {
 		c.channel.NotifyPublish(confirm)
 		return c.channel.Confirm(false)
 	}
+}
+
+// getSetupFuncName returns the name of the Setup function
+func getSetupFuncName(f Setup) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }

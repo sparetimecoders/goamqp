@@ -51,20 +51,20 @@ func Test_Consumer_Setups(t *testing.T) {
 			opts: []Setup{EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
 				return nil
 			})},
-			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: amqp.Table{}}},
+			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc", noWait: false, exchange: "events.topic.exchange", key: "key", args: amqp.Table{}}},
-			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc", noWait: false, exchange: "events.topic.exchange", key: "key", args: nil}},
+			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 		},
 		{
 			name: "EventStreamConsumer with suffix",
 			opts: []Setup{EventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
 				return nil
 			}, AddQueueNameSuffix("suffix"))},
-			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: amqp.Table{}}},
+			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc-suffix", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-suffix", noWait: false, exchange: "events.topic.exchange", key: "key", args: amqp.Table{}}},
-			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-suffix", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-suffix", noWait: false, exchange: "events.topic.exchange", key: "key", args: nil}},
+			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-suffix", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 		},
 		{
 			name: "EventStreamConsumer with empty suffix - fails",
@@ -79,22 +79,22 @@ func Test_Consumer_Setups(t *testing.T) {
 				return nil
 			})},
 			expectedExchanges: []ExchangeDeclaration{
-				{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: amqp.Table{}},
-				{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: amqp.Table{}},
+				{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: nil},
+				{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: nil},
 			},
 			expectedQueues:   []QueueDeclaration{{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}},
-			expectedBindings: []BindingDeclaration{{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}},
-			expectedConsumer: []Consumer{{queue: "svc.direct.exchange.request.queue", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
+			expectedBindings: []BindingDeclaration{{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: nil}},
+			expectedConsumer: []Consumer{{queue: "svc.direct.exchange.request.queue", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 		},
 		{
 			name: "ServiceResponseConsumer",
 			opts: []Setup{ServiceResponseConsumer("targetService", "key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
 				return nil
 			})},
-			expectedExchanges: []ExchangeDeclaration{{name: "targetService.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: amqp.Table{}}},
+			expectedExchanges: []ExchangeDeclaration{{name: "targetService.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "targetService.headers.exchange.response.queue.svc", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}},
 			expectedBindings:  []BindingDeclaration{{queue: "targetService.headers.exchange.response.queue.svc", noWait: false, exchange: "targetService.headers.exchange.response", key: "key", args: amqp.Table{headerService: "svc"}}},
-			expectedConsumer:  []Consumer{{queue: "targetService.headers.exchange.response.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
+			expectedConsumer:  []Consumer{{queue: "targetService.headers.exchange.response.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 			expectedHandler: &queueHandlers{"targetService.headers.exchange.response.queue.svc": &handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
 				return nil
 			}}},
@@ -104,10 +104,10 @@ func Test_Consumer_Setups(t *testing.T) {
 			opts: []Setup{TransientEventStreamConsumer("key", func(ctx context.Context, msg ConsumableEvent[TestMessage]) error {
 				return errors.New("failed")
 			})},
-			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", kind: "topic", durable: true, autoDelete: false, internal: false, noWait: false, args: amqp.Table{}}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: amqp.Table{}}},
+			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", kind: "topic", durable: true, autoDelete: false, internal: false, noWait: false, args: nil}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}},
-			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: amqp.Table{}}},
+			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 			expectedHandler: &queueHandlers{"events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f": &handlers{"key": func(ctx context.Context, event unmarshalEvent) error {
 				return nil
 			}}},
@@ -121,8 +121,8 @@ func Test_Consumer_Setups(t *testing.T) {
 					return errors.New("failed")
 				}),
 			},
-			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", kind: "topic", durable: true, autoDelete: false, internal: false, noWait: false, args: amqp.Table{}}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "root.key", exchange: "events.topic.exchange", noWait: false, args: amqp.Table{}}},
+			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", kind: "topic", durable: true, autoDelete: false, internal: false, noWait: false, args: nil}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "root.key", exchange: "events.topic.exchange", noWait: false, args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": 432000000}}},
 			expectedError:     "routingkey root.# overlaps root.key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f, consider using AddQueueNameSuffix",
 		},
