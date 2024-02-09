@@ -123,7 +123,6 @@ func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T]) S
 			queueName:    serviceRequestQueueName(c.serviceName),
 			exchangeName: serviceRequestExchangeName(c.serviceName),
 			kind:         kindDirect,
-			headers:      amqp.Table{},
 		}
 
 		return c.messageHandlerBindQueueToExchange(config)
@@ -140,7 +139,6 @@ func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T],
 			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
 			exchangeName: exchangeName,
 			kind:         kindTopic,
-			headers:      amqp.Table{},
 		}
 		for _, f := range opts {
 			if err := f(config); err != nil {
@@ -164,18 +162,17 @@ func TransientEventStreamConsumer[T any](routingKey string, handler EventHandler
 // For a durable queue, use the StreamConsumer function instead.
 func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHandler[T]) Setup {
 	exchangeName := topicExchangeName(exchange)
+
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
-		if err := c.addHandler(queueName, routingKey, newWrappedHandler(handler)); err != nil {
-			return err
+		config := &QueueBindingConfig{
+			routingKey:   routingKey,
+			handler:      newWrappedHandler(handler),
+			queueName:    queueName,
+			exchangeName: exchangeName,
+			kind:         kindTopic,
+			transient:    true,
 		}
-
-		if err := c.exchangeDeclare(c.channel, exchangeName, kindTopic); err != nil {
-			return err
-		}
-		if err := transientQueueDeclare(c.channel, queueName); err != nil {
-			return err
-		}
-		return c.channel.QueueBind(queueName, routingKey, exchangeName, false, amqp.Table{})
+		return c.messageHandlerBindQueueToExchange(config)
 	}
 }

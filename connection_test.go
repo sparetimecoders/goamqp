@@ -40,15 +40,6 @@ func Test_AmqpVersion(t *testing.T) {
 	require.Equal(t, "_unknown_", version())
 }
 
-func Test_getEventType(t *testing.T) {
-	e, err := getEventType(TestMessage{})
-	require.NoError(t, err)
-	require.Equal(t, reflect.TypeOf(TestMessage{}), e)
-
-	_, err = getEventType(reflect.TypeOf(TestMessage{}))
-	require.Error(t, err)
-}
-
 func Test_Start_MultipleCallsFails(t *testing.T) {
 	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
 	mockChannel := &MockAmqpChannel{
@@ -249,7 +240,7 @@ func Test_AmqpConfig(t *testing.T) {
 
 func Test_QueueDeclare(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	err := queueDeclare(channel, "test")
+	err := queueDeclare(channel, "test", false)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.QueueDeclarations))
 	require.Equal(t, QueueDeclaration{name: "test", durable: true, autoDelete: false, noWait: false, args: amqp.Table{"x-expires": int(deleteQueueAfter.Seconds() * 1000)}}, channel.QueueDeclarations[0])
@@ -257,7 +248,7 @@ func Test_QueueDeclare(t *testing.T) {
 
 func Test_TransientQueueDeclare(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	err := transientQueueDeclare(channel, "test")
+	err := queueDeclare(channel, "test", true)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(channel.QueueDeclarations))
@@ -272,7 +263,7 @@ func Test_ExchangeDeclare(t *testing.T) {
 	err := conn.exchangeDeclare(channel, "name", "topic")
 	require.NoError(t, err)
 	require.Equal(t, 1, len(channel.ExchangeDeclarations))
-	require.Equal(t, ExchangeDeclaration{name: "name", kind: "topic", durable: true, autoDelete: false, noWait: false, args: amqp.Table{}}, channel.ExchangeDeclarations[0])
+	require.Equal(t, ExchangeDeclaration{name: "name", kind: "topic", durable: true, autoDelete: false, noWait: false, args: nil}, channel.ExchangeDeclarations[0])
 }
 
 func Test_Consume(t *testing.T) {
@@ -282,7 +273,7 @@ func Test_Consume(t *testing.T) {
 	require.Equal(t, 1, len(channel.Consumers))
 	require.Equal(t, Consumer{
 		queue:    "q",
-		consumer: "", autoAck: false, exclusive: false, noLocal: false, noWait: false, args: amqp.Table{},
+		consumer: "", autoAck: false, exclusive: false, noLocal: false, noWait: false, args: nil,
 	}, channel.Consumers[0])
 }
 

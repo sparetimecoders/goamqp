@@ -48,14 +48,14 @@ func Test_RequestResponseHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 2, len(channel.ExchangeDeclarations))
-	require.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: amqp.Table{}}, channel.ExchangeDeclarations[0])
-	require.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: amqp.Table{}}, channel.ExchangeDeclarations[1])
+	require.Equal(t, ExchangeDeclaration{name: "svc.headers.exchange.response", noWait: false, internal: false, autoDelete: false, durable: true, kind: "headers", args: nil}, channel.ExchangeDeclarations[0])
+	require.Equal(t, ExchangeDeclaration{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: nil}, channel.ExchangeDeclarations[1])
 
 	require.Equal(t, 1, len(channel.QueueDeclarations))
 	require.Equal(t, QueueDeclaration{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, args: amqp.Table{"x-expires": 432000000}}, channel.QueueDeclarations[0])
 
 	require.Equal(t, 1, len(channel.BindingDeclarations))
-	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}, channel.BindingDeclarations[0])
+	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: nil}, channel.BindingDeclarations[0])
 
 	require.Equal(t, 1, len(conn.queueHandlers.queues()))
 
