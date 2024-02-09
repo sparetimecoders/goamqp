@@ -24,7 +24,6 @@ package goamqp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -78,7 +77,7 @@ func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
 
 // PublishServiceResponse sends a message to targetService as a handler response
 func (c *Connection) PublishServiceResponse(ctx context.Context, targetService, routingKey string, msg any) error {
-	return c.publishMessage(ctx, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
+	return publishMessage(ctx, c.channel, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
 }
 
 func (c *Connection) URI() amqp.URI {
@@ -187,32 +186,6 @@ func (c *Connection) connectToAmqpURL() error {
 
 func (c *Connection) addHandler(queueName, routingKey string, handler wrappedHandler) error {
 	return c.queueHandlers.add(queueName, routingKey, handler)
-}
-
-func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, exchangeName string, headers amqp.Table) error {
-	jsonBytes, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-
-	publishing := amqp.Publishing{
-		Body:         jsonBytes,
-		ContentType:  contentType,
-		DeliveryMode: 2,
-		Headers:      injectToHeaders(ctx, headers),
-	}
-	err = c.channel.PublishWithContext(ctx, exchangeName,
-		routingKey,
-		false,
-		false,
-		publishing,
-	)
-	if err != nil {
-		eventPublishFailed(exchangeName, routingKey)
-		return err
-	}
-	eventPublishSucceed(exchangeName, routingKey)
-	return nil
 }
 
 func getDeliveryInfo(queueName string, delivery amqp.Delivery) DeliveryInfo {
