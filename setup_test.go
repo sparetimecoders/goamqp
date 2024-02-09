@@ -23,6 +23,7 @@
 package goamqp
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -100,5 +101,34 @@ func Test_WithTypeMapping_TypeAlreadyExist(t *testing.T) {
 	require.EqualError(t, err, "mapping for type 'goamqp.TestMessage' already registered to routing key 'key'")
 
 	err = WithTypeMapping("key", TestMessage{})(conn)
+	require.NoError(t, err)
+}
+
+func Test_Start_WithPrefetchLimit_Resets_Qos(t *testing.T) {
+	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
+	mockChannel := &MockAmqpChannel{
+		qosFn: func(cc int) func(prefetchCount, prefetchSize int, global bool) error {
+			return func(prefetchCount, prefetchSize int, global bool) error {
+				defer func() {
+					cc++
+				}()
+				if cc == 0 {
+					require.Equal(t, 20, prefetchCount)
+				} else {
+					require.Equal(t, 1, prefetchCount)
+				}
+				return nil
+			}
+		}(0),
+	}
+	conn := &Connection{
+		serviceName:    "test",
+		connection:     mockAmqpConnection,
+		channel:        mockChannel,
+		queueConsumers: &queueConsumers{},
+	}
+	err := conn.Start(context.Background(),
+		WithPrefetchLimit(1),
+	)
 	require.NoError(t, err)
 }

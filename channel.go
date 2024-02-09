@@ -39,7 +39,7 @@ type AmqpChannel interface {
 	NotifyClose(c chan *amqp.Error) chan *amqp.Error
 	Confirm(noWait bool) error
 	// Qos controls how many messages or how many bytes the server will try to keep on
-	// the network for consumers before receiving delivery acks.  The intent of Qos is
+	// the network for queueConsumers before receiving delivery acks.  The intent of Qos is
 	// to make sure the network buffers stay full between the server and client.
 	// If your consumer work time is reasonably consistent and not much greater
 	// than two times your network round trip time, you will see significant

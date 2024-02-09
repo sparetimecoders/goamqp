@@ -31,10 +31,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-type RoutingKeyToType map[string]reflect.Type
-
-type TypeToRoutingKey map[reflect.Type]string
-
 // Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
@@ -56,7 +52,7 @@ func WithTypeMapping(routingKey string, msgType any) Setup {
 }
 
 // WithPrefetchLimit configures the number of messages to prefetch from the server.
-// To get round-robin behavior between consumers consuming from the same queue on
+// To get round-robin behavior between queueConsumers consuming from the same queue on
 // different connections, set the prefetch count to 1, and the next available
 // message on the server will be delivered to the next available consumer.
 // If your consumer work time is reasonably consistent and not much greater

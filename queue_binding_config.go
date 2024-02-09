@@ -24,7 +24,7 @@ type QueueBindingConfig struct {
 }
 
 // AddQueueNameSuffix appends the provided suffix to the queue name
-// Useful when multiple consumers are needed for a routing key in the same service
+// Useful when multiple queueConsumers are needed for a routing key in the same service
 func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
 	return func(config *QueueBindingConfig) error {
 		if suffix == "" {

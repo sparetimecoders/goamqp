@@ -28,25 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+func Test_Must(t *testing.T) {
+	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
+	require.NotNil(t, conn)
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
-
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+	_ = Must(NewFromURL("", "invalid"))
 }

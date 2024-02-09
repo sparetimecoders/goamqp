@@ -34,6 +34,8 @@ type Header struct {
 	Value any
 }
 
+var ErrEmptyHeaderKey = errors.New("empty key not allowed")
+
 // Headers represent all meta-data for the message
 type Headers map[string]any
 
@@ -47,7 +49,7 @@ func (h Headers) Get(key string) any {
 
 func (h Header) validateKey() error {
 	if len(h.Key) == 0 || h.Key == "" {
-		return errors.New("empty key not allowed")
+		return ErrEmptyHeaderKey
 	}
 	for _, rh := range reservedHeaderKeys {
 		if rh == h.Key {
