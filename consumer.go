@@ -45,7 +45,11 @@ type (
 	RequestResponseEventHandler[T any, R any] func(ctx context.Context, event ConsumableEvent[T]) (R, error)
 )
 
-func WithTypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
+// TypeMappingHandler wraps a Handler func into an EventHandler in order to use it with the different
+// Consumer Setup func.
+// It will use the mappings from WithTypeMapping to determine routing key -> actual event type and pass it to the
+// handler func.
+func TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
 	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
 		message, exists := routingKeyToTypeFromContext(ctx, event)
 		if !exists {
@@ -61,28 +65,6 @@ func WithTypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
 		}
 		return handler(ctx, msg)
 	}
-}
-
-type routingKeyToTypeCtx string
-
-const routingKeyToTypeCtxProperty routingKeyToTypeCtx = "routingKeyToType"
-
-func injectRoutingKeyToTypeContext(ctx context.Context, keyToType RoutingKeyToType) context.Context {
-	return context.WithValue(ctx, routingKeyToTypeCtxProperty, keyToType)
-}
-
-func routingKeyToTypeFromContext[T any](ctx context.Context, event ConsumableEvent[T]) (any, bool) {
-	routingKey := event.DeliveryInfo.RoutingKey
-	keyToType, ok := ctx.Value(routingKeyToTypeCtxProperty).(RoutingKeyToType)
-	if !ok {
-		return nil, false
-	}
-
-	typ, exists := keyToType[routingKey]
-	if !exists {
-		return nil, false
-	}
-	return reflect.New(typ).Interface(), true
 }
 
 // EventStreamConsumer sets up ap a durable, persistent event stream consumer.
@@ -175,4 +157,27 @@ func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHa
 		}
 		return c.messageHandlerBindQueueToExchange(config)
 	}
+}
+
+// Handles WithTypeMapping mappings in context.Context
+type routingKeyToTypeCtx string
+
+const routingKeyToTypeCtxProperty routingKeyToTypeCtx = "routingKeyToType"
+
+func injectRoutingKeyToTypeContext(ctx context.Context, keyToType RoutingKeyToType) context.Context {
+	return context.WithValue(ctx, routingKeyToTypeCtxProperty, keyToType)
+}
+
+func routingKeyToTypeFromContext[T any](ctx context.Context, event ConsumableEvent[T]) (any, bool) {
+	routingKey := event.DeliveryInfo.RoutingKey
+	keyToType, ok := ctx.Value(routingKeyToTypeCtxProperty).(RoutingKeyToType)
+	if !ok {
+		return nil, false
+	}
+
+	typ, exists := keyToType[routingKey]
+	if !exists {
+		return nil, false
+	}
+	return reflect.New(typ).Interface(), true
 }

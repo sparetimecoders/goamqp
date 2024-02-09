@@ -652,7 +652,7 @@ func TestConnection_TypeMappingHandler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := injectRoutingKeyToTypeContext(context.TODO(), tt.fields.keyToType)
 
-			handler := WithTypeMappingHandler(tt.args.handler(t))
+			handler := TypeMappingHandler(tt.args.handler(t))
 			err := handler(ctx, ConsumableEvent[json.RawMessage]{
 				Payload:      tt.args.msg,
 				DeliveryInfo: DeliveryInfo{RoutingKey: tt.args.key},
