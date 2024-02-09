@@ -22,7 +22,11 @@
 
 package goamqp
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // RequestResponseHandler is a convenience func to set up ServiceRequestConsumer and combines it with
 // PublishServiceResponse
@@ -33,4 +37,34 @@ func RequestResponseHandler[T any, R any](routingKey string, handler RequestResp
 		})
 		return ServiceRequestConsumer[T](routingKey, responseHandlerWrapper)(c)
 	}
+}
+
+func responseWrapper[T, R any](handler RequestResponseEventHandler[T, R], routingKey string, publisher ServiceResponsePublisher[R]) EventHandler[T] {
+	return func(ctx context.Context, event ConsumableEvent[T]) (err error) {
+		resp, err := handler(ctx, event)
+		if err != nil {
+			return fmt.Errorf("failed to process message, %w", err)
+		}
+		service, err := sendingService(event.DeliveryInfo)
+		if err != nil {
+			return fmt.Errorf("failed to extract service name, %w", err)
+		}
+		err = publisher(ctx, service, routingKey, resp)
+		if err != nil {
+			return fmt.Errorf("failed to publish response, %w", err)
+		}
+		return nil
+	}
+}
+
+// sendingService returns the name of the service that produced the message
+// Can be used to send a handlerResponse, see PublishServiceResponse
+func sendingService(di DeliveryInfo) (string, error) {
+	if h, exist := di.Headers[headerService]; exist {
+		switch v := h.(type) {
+		case string:
+			return v, nil
+		}
+	}
+	return "", errors.New("no service found")
 }
