@@ -28,11 +28,15 @@ repos:
     rev: v1.5.4
     hooks:
     - id: insert-license
-      files: \_test.go$
+      files: \.go$
       args:
         - --license-filepath
-        - LICENSE        # defaults to: LICENSE.txt
+        - LICENSE
         - --comment-style
-        - //                           # defaults to:  #
+        - //
         - --use-current-year
-        - --no-extra-eol
+  - repo: https://github.com/sparetimecoders/pre-commit-check-signed
+    rev: v0.0.1
+    hooks:
+    - id: check-signed-commit
+      name: check-signed-commit
