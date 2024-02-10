@@ -76,6 +76,51 @@ func Test_Start_SettingDefaultQosFails(t *testing.T) {
 	require.EqualError(t, err, "error setting qos")
 }
 
+func Test_messageHandlerBindQueueToExchange(t *testing.T) {
+	tests := []struct {
+		name                     string
+		queueDeclarationError    error
+		exchangeDeclarationError error
+	}{
+		{
+			name: "ok",
+		},
+		{
+			name:                  "queue declare error",
+			queueDeclarationError: errors.New("failed to create queue"),
+		},
+		{
+			name:                     "exchange declare error",
+			exchangeDeclarationError: errors.New("failed to create exchange"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &MockAmqpChannel{
+				QueueDeclarationError:    &tt.queueDeclarationError,
+				ExchangeDeclarationError: &tt.exchangeDeclarationError,
+			}
+			conn := mockConnection(channel)
+			cfg := &QueueBindingConfig{
+				routingKey:   "routingkey",
+				handler:      nil,
+				queueName:    "queue",
+				exchangeName: "exchange",
+				kind:         kindDirect,
+				headers:      nil,
+			}
+			err := conn.messageHandlerBindQueueToExchange(cfg)
+			if tt.queueDeclarationError != nil {
+				require.ErrorIs(t, err, tt.queueDeclarationError)
+			} else if tt.exchangeDeclarationError != nil {
+				require.ErrorIs(t, err, tt.exchangeDeclarationError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func Test_Start_SetupFails(t *testing.T) {
 	mockAmqpConnection := &MockAmqpConnection{ChannelConnected: true}
 	mockChannel := &MockAmqpChannel{
