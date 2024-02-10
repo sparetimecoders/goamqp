@@ -56,7 +56,7 @@ func TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
 			return ErrNoMessageTypeForRouteKey
 		}
 		if err := json.Unmarshal(event.Payload, &message); err != nil {
-			return err
+			return fmt.Errorf("%v: %w", err, ErrParseJSON)
 		}
 		msg := ConsumableEvent[any]{
 			Metadata:     event.Metadata,
