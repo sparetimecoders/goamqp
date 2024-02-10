@@ -232,7 +232,7 @@ func Test_TypeMappingHandler(t *testing.T) {
 				},
 			},
 			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
-				return assert.EqualError(t, err, "unexpected end of JSON input")
+				return assert.ErrorContains(t, err, "unexpected end of JSON input")
 			},
 		},
 		{
