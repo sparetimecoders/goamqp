@@ -127,8 +127,11 @@ func Test_Start_WithPrefetchLimit_Resets_Qos(t *testing.T) {
 		channel:        mockChannel,
 		queueConsumers: &queueConsumers{},
 	}
+	notifications := make(chan<- Notification)
 	err := conn.Start(context.Background(),
 		WithPrefetchLimit(1),
+		WithNotificationChannel(notifications),
 	)
 	require.NoError(t, err)
+	require.Equal(t, notifications, conn.notificationCh)
 }

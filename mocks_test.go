@@ -182,10 +182,6 @@ func (m *MockAmqpChannel) ExchangeDeclare(name, kind string, durable, autoDelete
 	return nil
 }
 
-func (m *MockAmqpChannel) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
-	return m.PublishWithContext(context.Background(), exchange, key, mandatory, immediate, msg)
-}
-
 func (m *MockAmqpChannel) PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	if key == "failed" {
 		return errors.New("failed")
@@ -234,14 +230,6 @@ func NewMockAmqpChannel() *MockAmqpChannel {
 	return &MockAmqpChannel{
 		Published: make(chan Publish, 3),
 		Delivery:  make(chan amqp.Delivery, 3),
-	}
-}
-
-func NewMockAcknowledger() MockAcknowledger {
-	return MockAcknowledger{
-		Acks:    make(chan Ack, 2),
-		Nacks:   make(chan Nack, 2),
-		Rejects: make(chan Reject, 2),
 	}
 }
 

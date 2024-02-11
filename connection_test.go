@@ -268,6 +268,12 @@ func Test_ExchangeDeclare(t *testing.T) {
 	require.Equal(t, ExchangeDeclaration{name: "name", kind: "topic", durable: true, autoDelete: false, noWait: false, args: nil}, channel.ExchangeDeclarations[0])
 }
 
+func Test_Publish_Fail(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	err := publishMessage(context.Background(), channel, Message{true}, "failed", "exchange", nil)
+	require.EqualError(t, err, "failed")
+}
+
 func Test_Publish(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	headers := amqp.Table{}
