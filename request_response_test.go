@@ -60,6 +60,9 @@ func Test_RequestResponseHandler(t *testing.T) {
 	require.Len(t, *conn.queueConsumers, 1)
 	handler, _ := conn.queueConsumers.get("svc.direct.exchange.request.queue", "key")
 	require.Equal(t, "github.com/sparetimecoders/goamqp.ServiceRequestConsumer[...].func1", runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name())
+	missing, exists := conn.queueConsumers.get("miggins", "key")
+	require.Nil(t, missing)
+	require.False(t, exists)
 
 	msg, _ := json.Marshal(Message{Ok: true})
 	err = handler(context.TODO(), unmarshalEvent{
