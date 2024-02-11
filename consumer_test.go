@@ -33,6 +33,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func Test_Invalid_Payload(t *testing.T) {
+	err := newWrappedHandler(func(ctx context.Context, event ConsumableEvent[string]) error {
+		return nil
+	})(context.TODO(), unmarshalEvent{Payload: []byte(`{"a":}`)})
+	require.ErrorIs(t, err, ErrParseJSON)
+	require.ErrorContains(t, err, "invalid character '}' looking for beginning of value")
+}
+
 func Test_Consume(t *testing.T) {
 	consumer := queueConsumer{
 		queue:    "aQueue",
@@ -105,6 +113,62 @@ func Test_ConsumerLoop(t *testing.T) {
 	require.Len(t, acker.Rejects, 1)
 	require.Len(t, acker.Nacks, 1)
 	require.Len(t, acker.Acks, 2)
+}
+
+func Test_HandleDelivery(t *testing.T) {
+	tests := []struct {
+		name            string
+		error           error
+		numberOfAcks    int
+		numberOfNacks   int
+		numberOfRejects int
+		notification    string
+	}{
+		{
+			name:         "ok",
+			notification: "event handler for key succeeded",
+			numberOfAcks: 1,
+		},
+		{
+			name:          "invalid JSON",
+			error:         ErrParseJSON,
+			notification:  "error: failed to parse",
+			numberOfNacks: 1,
+		},
+		{
+			name:            "no match for routingkey",
+			error:           ErrNoMessageTypeForRouteKey,
+			notification:    "error: no message type for routingkey configured",
+			numberOfRejects: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			notifications := make(chan Notification, 1)
+			consumer := queueConsumer{
+				notificationCh: notifications,
+			}
+			deliveryInfo := DeliveryInfo{
+				RoutingKey: "key",
+			}
+			acker := MockAcknowledger{
+				Acks:    make(chan Ack, 1),
+				Nacks:   make(chan Nack, 1),
+				Rejects: make(chan Reject, 1),
+			}
+			handler := func(ctx context.Context, event unmarshalEvent) error {
+				return tt.error
+			}
+			d := delivery(acker, "routingKey", true)
+			consumer.handleDelivery(handler, d, deliveryInfo)
+			notification := <-notifications
+			require.Contains(t, notification.Message, tt.notification)
+
+			require.Len(t, acker.Acks, tt.numberOfAcks)
+			require.Len(t, acker.Nacks, tt.numberOfNacks)
+			require.Len(t, acker.Rejects, tt.numberOfRejects)
+		})
+	}
 }
 
 func delivery(acker MockAcknowledger, routingKey string, success bool) amqp.Delivery {
