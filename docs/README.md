@@ -34,7 +34,7 @@ anything.
 
 ```go
 conn, _ := goamqp.NewFromURL("our-service", "amqp://user:password@localhost:5672/")
-_ = conn.Start()
+_ = conn.Start(context.Background())
 _ = conn.Close()
 ```
 
@@ -42,20 +42,18 @@ To actually create `exchanges`, `queues` and `bindings` we must pass one or more
 
 ### Publishing
 
-The `Publisher` is used to send a message (event) of a certain type.
+The `Publisher` is used to send a messages (events) of a certain types.
 
 ```go
 type AccountCreated struct {
     Name string `json:"name"`
 }
 
-publisher := goamqp.Must(
-    goamqp.NewPublisher(goamqp.Route{
-        Type: AccountCreated{},
-        Key:  "Account.Created",
-    }))
-
-
+publisher := goamqp.NewPublisher()
+conn.Start(
+  context.Background(),
+  goamqp.WithTypeMapping("Account.Created", AccountCreated{}),
+)
 
 ```
 This will create a `Publisher` that will publish `AccountCreated` messages with an associated routing key
@@ -69,14 +67,17 @@ In this simple case we send messages to the default `event stream` by using the 
 `EventStreamPublisher`.
 
 ```go
-_ = conn.Start(goamqp.EventStreamPublisher(publisher))
+conn.Start(
+  context.Background(),
+  goamqp.WithTypeMapping("Account.Created", AccountCreated{}),
+  goamqp.EventStreamPublisher(publisher))
 ```
 
 Now, when we call `Start` entities will be created on the message broker. A new exchange  called `events.topic.exchange`
 will be created (if it doesn't already exist). Now when we do:
 
 ```go
-_ = publisher.Publish(&AccountCreated{Name: "test"})
+publisher.Publish(&AccountCreated{Name: "test"})
 ```
 the `AccountCreated` struct will be marshalled into JSON:
 
@@ -96,12 +97,13 @@ Let's consume messages (in the same service, i.e. we send a message to ourselves
 using the `Setup` func `EventStreamConsumer`.
 
 ```go
-_ = conn.Start(
-	goamqp.EventStreamPublisher(publisher),
-	goamqp.EventStreamConsumer("Account.Created", func(msg any, headers goamqp.Headers) (response any, err error) {
-	    fmt.Println("Message received")
-	    return nil, nil
-    }, AccountCreated{}))
+conn.Start(
+  context.Background(),
+  goamqp.EventStreamPublisher(publisher),
+  goamqp.EventStreamConsumer("Account.Created", func(ctx context.Context, event goamqp.ConsumableEvent[AccountCreated]) error {
+    fmt.Println("Message received")
+    return nil
+  }))
 
 ```
 
@@ -118,40 +120,40 @@ The complete simple program below will send (and receive) a message and print it
 ```
 Message received &{test}
 ```
+
 ```go
 package main
 
 import (
-	"fmt"
-	"time"
+  "context"
+  "fmt"
+  "time"
 
-	"github.com/sparetimecoders/goamqp"
+  "github.com/sparetimecoders/goamqp"
 )
 
 type AccountCreated struct {
-	Name string `json:"name"`
+  Name string `json:"name"`
 }
 
 func main() {
 
-	publisher := goamqp.Must(
-		goamqp.NewPublisher(goamqp.Route{
-			Type: AccountCreated{},
-			Key:  "Account.Created",
-		}))
+  publisher := goamqp.NewPublisher()
 
-	conn, _ := goamqp.NewFromURL("our-service", "amqp://user:password@localhost:5672/")
+  conn := goamqp.Must(goamqp.NewFromURL("our-service", "amqp://user:password@localhost:5672/"))
 
-	_ = conn.Start(
-		goamqp.EventStreamPublisher(publisher),
-		goamqp.EventStreamConsumer("Account.Created", func(msg any, headers goamqp.Headers) (response any, err error) {
-			fmt.Printf("Message received %s", msg)
-			return nil, nil
-		}, AccountCreated{}))
+  _ = conn.Start(
+    context.Background(),
+    goamqp.EventStreamPublisher(publisher),
+    goamqp.WithTypeMapping("Account.Created", AccountCreated{}),
+    goamqp.EventStreamConsumer("Account.Created", func(ctx context.Context, event goamqp.ConsumableEvent[AccountCreated]) error {
+      fmt.Printf("Message received %s", event.Payload.Name)
+      return nil
+    }))
 
-	_ = publisher.Publish(&AccountCreated{Name: "test"})
+  _ = publisher.Publish(context.Background(), &AccountCreated{Name: "test"})
 
-	time.Sleep(time.Second)
-	_ = conn.Close()
+  time.Sleep(time.Second)
+  _ = conn.Close()
 }
 ```
