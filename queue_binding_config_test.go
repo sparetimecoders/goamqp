@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,18 @@
 
 package goamqp
 
-// errorLogf function called for error logs
-type errorLog func(s string)
+import (
+	"testing"
 
-// noOpLogger log function that does nothing
-var noOpLogger = func(s string) {}
+	"github.com/stretchr/testify/require"
+)
+
+func TestEmptyQueueNameSuffix(t *testing.T) {
+	require.EqualError(t, AddQueueNameSuffix("")(&QueueBindingConfig{}), ErrEmptySuffix.Error())
+}
+
+func TestQueueNameSuffix(t *testing.T) {
+	cfg := &QueueBindingConfig{queueName: "queue"}
+	require.NoError(t, AddQueueNameSuffix("suffix")(cfg))
+	require.Equal(t, "queue-suffix", cfg.queueName)
+}

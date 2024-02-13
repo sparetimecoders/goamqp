@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,6 @@ package goamqp
 import (
 	"context"
 	"errors"
-	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -182,10 +181,6 @@ func (m *MockAmqpChannel) ExchangeDeclare(name, kind string, durable, autoDelete
 	return nil
 }
 
-func (m *MockAmqpChannel) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
-	return m.PublishWithContext(context.Background(), exchange, key, mandatory, immediate, msg)
-}
-
 func (m *MockAmqpChannel) PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	if key == "failed" {
 		return errors.New("failed")
@@ -237,14 +232,6 @@ func NewMockAmqpChannel() *MockAmqpChannel {
 	}
 }
 
-func NewMockAcknowledger() MockAcknowledger {
-	return MockAcknowledger{
-		Acks:    make(chan Ack, 2),
-		Nacks:   make(chan Nack, 2),
-		Rejects: make(chan Reject, 2),
-	}
-}
-
 var (
 	_ amqpConnection = &MockAmqpConnection{}
 	_ AmqpChannel    = &MockAmqpChannel{}
@@ -254,7 +241,6 @@ func mockConnection(channel *MockAmqpChannel) *Connection {
 	c := newConnection("svc", amqp.URI{})
 	c.channel = channel
 	c.connection = &MockAmqpConnection{}
-	c.messageLogger = noOpMessageLogger()
 	return c
 }
 
@@ -265,20 +251,4 @@ func (r badRand) Read(buf []byte) (int, error) {
 		buf[i] = byte(i)
 	}
 	return len(buf), nil
-}
-
-type MockLogger struct {
-	jsonContent []byte
-	eventType   reflect.Type
-	routingKey  string
-	outgoing    bool
-}
-
-func (m *MockLogger) logger() MessageLogger {
-	return func(jsonContent []byte, eventType reflect.Type, routingKey string, outgoing bool) {
-		m.jsonContent = jsonContent
-		m.eventType = eventType
-		m.routingKey = routingKey
-		m.outgoing = outgoing
-	}
 }

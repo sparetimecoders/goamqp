@@ -24,40 +24,40 @@ package goamqp
 
 import (
 	"fmt"
+	"reflect"
+	"runtime"
 
-	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-const defaultEventExchangeName = "events"
+// QueueBindingConfigSetup is a setup function that takes a QueueBindingConfig and provide custom changes to the
+// configuration
+type QueueBindingConfigSetup func(config *QueueBindingConfig) error
 
-func topicExchangeName(svcName string) string {
-	return fmt.Sprintf("%s.%s.exchange", svcName, kindTopic)
+// QueueBindingConfig is a wrapper around the actual amqp queue configuration
+type QueueBindingConfig struct {
+	routingKey   string
+	handler      wrappedHandler
+	queueName    string
+	exchangeName string
+	kind         kind
+	headers      amqp.Table
+	transient    bool
 }
 
-func serviceEventQueueName(exchangeName, service string) string {
-	return fmt.Sprintf("%s.queue.%s", exchangeName, service)
+// AddQueueNameSuffix appends the provided suffix to the queue name
+// Useful when multiple queueConsumers are needed for a routing key in the same service
+func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
+	return func(config *QueueBindingConfig) error {
+		if suffix == "" {
+			return ErrEmptySuffix
+		}
+		config.queueName = fmt.Sprintf("%s-%s", config.queueName, suffix)
+		return nil
+	}
 }
 
-func serviceEventRandomQueueName(exchangeName, service string) string {
-	return fmt.Sprintf("%s.queue.%s-%s", exchangeName, service, randomString())
-}
-
-func serviceRequestExchangeName(svcName string) string {
-	return fmt.Sprintf("%s.direct.exchange.request", svcName)
-}
-
-func serviceResponseExchangeName(svcName string) string {
-	return fmt.Sprintf("%s.headers.exchange.response", svcName)
-}
-
-func serviceRequestQueueName(service string) string {
-	return fmt.Sprintf("%s.queue", serviceRequestExchangeName(service))
-}
-
-func serviceResponseQueueName(targetService, serviceName string) string {
-	return fmt.Sprintf("%s.queue.%s", serviceResponseExchangeName(targetService), serviceName)
-}
-
-func randomString() string {
-	return uuid.New().String()
+// getQueueBindingConfigSetupFuncName returns the name of the QueueBindingConfigSetup function
+func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
