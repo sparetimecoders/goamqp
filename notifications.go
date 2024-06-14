@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,25 +22,43 @@
 
 package goamqp
 
-import (
-	"os"
-	"reflect"
-	"testing"
+import "fmt"
 
-	"github.com/stretchr/testify/require"
+type NotificationSource string
+
+const (
+	NotificationSourceConsumer NotificationSource = "CONSUMER"
 )
 
-func TestStdoutLogger(t *testing.T) {
-	file, err := os.CreateTemp("", "")
-	require.NoError(t, err)
-	defer func() { _ = os.Remove(file.Name()) }()
-	logger := StdOutMessageLogger()
-	stdout := os.Stdout
-	os.Stdout = file
-	logger([]byte(`{"key":"value"}`), reflect.TypeOf(Connection{}), "key", false)
-	os.Stdout = stdout
-	file.Close()
-	all, err := os.ReadFile(file.Name())
-	require.NoError(t, err)
-	require.Equal(t, "Received [goamqp.Connection] from routingkey: 'key' with content:\n{\n\t\"key\": \"value\"\n}\n", string(all))
+type NotificationType string
+
+const (
+	NotificationTypeInfo  NotificationType = "INFO"
+	NotificationTypeError NotificationType = "ERROR"
+)
+
+type Notification struct {
+	Message string
+	Type    NotificationType
+	Source  NotificationSource
+}
+
+func notifyEventHandlerSucceed(ch chan<- Notification, routingKey string, took int64) {
+	if ch != nil {
+		ch <- Notification{
+			Type:    NotificationTypeInfo,
+			Message: fmt.Sprintf("event handler for %s succeeded, took %d milliseconds", routingKey, took),
+			Source:  NotificationSourceConsumer,
+		}
+	}
+}
+
+func notifyEventHandlerFailed(ch chan<- Notification, routingKey string, took int64, err error) {
+	if ch != nil {
+		ch <- Notification{
+			Type:    NotificationTypeError,
+			Message: fmt.Sprintf("event handler for %s failed, took %d milliseconds, error: %s", routingKey, took, err),
+			Source:  NotificationSourceConsumer,
+		}
+	}
 }
