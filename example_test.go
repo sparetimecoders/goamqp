@@ -32,6 +32,7 @@ var amqpURL = "amqp://user:password@localhost:5672/"
 
 func Example() {
 	ctx := context.Background()
+
 	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
 		amqpURL = urlFromEnv
 	}
@@ -58,7 +59,7 @@ func checkError(err error) {
 	}
 }
 
-func process(m any, headers Headers) (any, error) {
+func process(ctx context.Context, m any, headers Headers) (any, error) {
 	fmt.Printf("Called process with %v\n", m.(*IncomingMessage).Data)
 	return nil, nil
 }

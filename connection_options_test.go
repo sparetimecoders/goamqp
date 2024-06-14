@@ -183,7 +183,7 @@ func Test_UseMessageLogger_Default(t *testing.T) {
 func Test_EventStreamConsumer(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func Test_EventStreamConsumer(t *testing.T) {
 func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("suffix")))
 	require.NoError(t, err)
@@ -223,7 +223,7 @@ func Test_EventStreamConsumerWithOptFunc(t *testing.T) {
 func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), EventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), EventStreamConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}, AddQueueNameSuffix("")))
 	require.ErrorContains(t, err, "failed, empty queue suffix not allowed")
@@ -232,7 +232,7 @@ func Test_EventStreamConsumerWithFailingOptFunc(t *testing.T) {
 func Test_ServiceRequestConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -256,7 +256,7 @@ func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 	declareError := errors.New("failed")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceRequestConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -266,7 +266,7 @@ func Test_ServiceRequestConsumer_ExchangeDeclareError(t *testing.T) {
 func Test_ServiceResponseConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -289,7 +289,7 @@ func Test_ServiceResponseConsumer_ExchangeDeclareError(t *testing.T) {
 	declareError := errors.New("actual error message")
 	channel.ExchangeDeclarationError = &declareError
 	conn := mockConnection(channel)
-	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(i any, headers Headers) (any, error) {
+	err := conn.Start(context.Background(), ServiceResponseConsumer("targetService", "key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, nil
 	}, TestMessage{}))
 
@@ -299,7 +299,7 @@ func Test_ServiceResponseConsumer_ExchangeDeclareError(t *testing.T) {
 func Test_RequestResponseHandler(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
-	err := RequestResponseHandler("key", func(msg any, headers Headers) (response any, err error) {
+	err := RequestResponseHandler("key", func(ctx context.Context, msg any, headers Headers) (response any, err error) {
 		return nil, nil
 	}, Message{})(conn)
 	require.NoError(t, err)
@@ -412,7 +412,7 @@ func Test_TransientEventStreamConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := TransientEventStreamConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
@@ -437,7 +437,7 @@ func Test_TransientEventStreamConsumer_HandlerForRoutingKeyAlreadyExists(t *test
 	require.NoError(t, conn.queueHandlers.Add("events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", "root.key", &messageHandlerInvoker{}))
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("root.#", func(i any, headers Headers) (any, error) {
+	err := TransientEventStreamConsumer("root.#", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
@@ -463,7 +463,7 @@ func testTransientEventStreamConsumerFailure(t *testing.T, channel *MockAmqpChan
 	conn := mockConnection(channel)
 
 	uuid.SetRand(badRand{})
-	err := TransientEventStreamConsumer("key", func(i any, headers Headers) (any, error) {
+	err := TransientEventStreamConsumer("key", func(ctx context.Context, i any, headers Headers) (any, error) {
 		return nil, errors.New("failed")
 	}, Message{})(conn)
 
