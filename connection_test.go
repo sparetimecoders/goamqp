@@ -509,6 +509,26 @@ func testHandleMessage(json string, handle bool) MockAcknowledger {
 	return acker
 }
 
+func Test_HandleMessage_RecoverableError(t *testing.T) {
+	var logged bool
+	type Message struct{}
+	acker := NewMockAcknowledger()
+	delivery := amqp.Delivery{
+		Body:         []byte("{}"),
+		Acknowledger: &acker,
+	}
+	c := &Connection{
+		messageLogger: noOpMessageLogger(),
+		errorLog: func(s string) {
+			logged = true
+		},
+	}
+	c.handleMessage(delivery, func(i any, headers Headers) (any, error) {
+		return nil, fmt.Errorf("error: %w", ErrRecoverable)
+	}, reflect.TypeOf(Message{}))
+	require.False(t, logged)
+}
+
 func Test_Publisher_ReservedHeader(t *testing.T) {
 	p := NewPublisher()
 	err := p.PublishWithContext(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})

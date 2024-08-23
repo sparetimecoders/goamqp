@@ -99,6 +99,8 @@ var (
 	ErrIllegalEventType = fmt.Errorf("passing reflect.TypeOf event types is not allowed")
 	// ErrNilLogger is returned if nil is passed as a logger func
 	ErrNilLogger = errors.New("cannot use nil as logger func")
+	// ErrRecoverable will not be logged during message processing
+	ErrRecoverable = errors.New("recoverable error")
 )
 
 // NewFromURL creates a new Connection from an URL
@@ -360,7 +362,9 @@ func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventTy
 		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
 			_ = d.Ack(false)
 		} else {
-			c.errorLog(fmt.Sprintf("failed to process message %s", err))
+			if !errors.Is(err, ErrRecoverable) {
+				c.errorLog(fmt.Sprintf("failed to process message %s", err))
+			}
 			_ = d.Nack(false, true)
 		}
 	}
