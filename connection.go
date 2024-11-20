@@ -24,6 +24,7 @@ package goamqp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
