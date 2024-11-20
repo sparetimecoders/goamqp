@@ -166,21 +166,15 @@ func Test_MappingsInContext(t *testing.T) {
 	}
 	rootCtx := context.TODO()
 	ctx := injectRoutingKeyToTypeContext(rootCtx, mappings)
-	instance, ok := routingKeyToTypeFromContext(ctx, ConsumableEvent[any]{
-		DeliveryInfo: DeliveryInfo{RoutingKey: "string"},
-	})
+	instance, ok := routingKeyToTypeFromContext(ctx, "string")
 	require.True(t, ok)
 	require.IsType(t, reflect.TypeOf(instance), reflect.TypeOf(""))
 
-	_, ok = routingKeyToTypeFromContext(ctx, ConsumableEvent[any]{
-		DeliveryInfo: DeliveryInfo{RoutingKey: "int"},
-	})
+	_, ok = routingKeyToTypeFromContext(ctx, "int")
 	require.False(t, ok)
 
 	// This should always fail
-	_, ok = routingKeyToTypeFromContext(rootCtx, ConsumableEvent[any]{
-		DeliveryInfo: DeliveryInfo{RoutingKey: "string"},
-	})
+	_, ok = routingKeyToTypeFromContext(rootCtx, "string")
 	require.False(t, ok)
 }
 

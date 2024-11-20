@@ -38,11 +38,13 @@ type queueConsumer struct {
 	handlers         routingKeyHandler
 	routingKeyToType routingKeyToType
 	notificationCh   chan<- Notification
+	errorCh          chan<- ErrorNotification
 }
 
-func (c *queueConsumer) consume(channel AmqpChannel, routingKeyToType routingKeyToType, notificationCh chan<- Notification) (<-chan amqp.Delivery, error) {
+func (c *queueConsumer) consume(channel AmqpChannel, routingKeyToType routingKeyToType, notificationCh chan<- Notification, errorCh chan<- ErrorNotification) (<-chan amqp.Delivery, error) {
 	c.routingKeyToType = routingKeyToType
 	c.notificationCh = notificationCh
+	c.errorCh = errorCh
 	deliveries, err := channel.Consume(c.queue, "", false, false, false, false, nil)
 	if err != nil {
 		return nil, err
@@ -79,7 +81,7 @@ func (c *queueConsumer) handleDelivery(handler wrappedHandler, delivery amqp.Del
 	uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
 	if err := handler(handlerCtx, uevt); err != nil {
 		elapsed := time.Since(startTime).Milliseconds()
-		notifyEventHandlerFailed(c.notificationCh, deliveryInfo.RoutingKey, elapsed, err)
+		notifyEventHandlerFailed(c.errorCh, deliveryInfo.RoutingKey, elapsed, err)
 		if errors.Is(err, ErrParseJSON) {
 			eventNotParsable(deliveryInfo.Queue, deliveryInfo.RoutingKey)
 			_ = delivery.Nack(false, false)
