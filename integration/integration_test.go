@@ -33,10 +33,11 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/sparetimecoders/goamqp"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+
+	. "github.com/sparetimecoders/goamqp"
 )
 
 var (
@@ -99,7 +100,8 @@ func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), []Queue{{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: "classic",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -184,7 +186,8 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: "classic",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -209,7 +212,8 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: "classic",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -288,7 +292,8 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: "classic",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -316,7 +321,8 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: "classic",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -400,7 +406,8 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		if q.Name == "events.topic.exchange.queue.client1" {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
-					XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+					XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+					XQueueType: "classic",
 				},
 				AutoDelete:           false,
 				Durable:              true,
@@ -421,7 +428,8 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		} else {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
-					XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+					XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+					XQueueType: "classic",
 				},
 				AutoDelete:           true,
 				Durable:              false,
@@ -526,7 +534,8 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: "classic",
 		},
 		AutoDelete:           false,
 		Durable:              true,
