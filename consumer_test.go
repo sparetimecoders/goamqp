@@ -62,7 +62,7 @@ func Test_Consume(t *testing.T) {
 		return deliveries, nil
 	}}
 
-	deliveries, err := consumer.consume(channel, nil, nil)
+	deliveries, err := consumer.consume(channel, nil, nil, nil)
 	require.NoError(t, err)
 	delivery := <-deliveries
 	require.Equal(t, "MESSAGE_ID", delivery.MessageId)
@@ -77,7 +77,7 @@ func Test_Consume_Failing(t *testing.T) {
 		return nil, fmt.Errorf("failed")
 	}}
 
-	_, err := consumer.consume(channel, nil, nil)
+	_, err := consumer.consume(channel, nil, nil, nil)
 	require.EqualError(t, err, "failed")
 }
 
@@ -117,12 +117,13 @@ func Test_ConsumerLoop(t *testing.T) {
 
 func Test_HandleDelivery(t *testing.T) {
 	tests := []struct {
-		name            string
-		error           error
-		numberOfAcks    int
-		numberOfNacks   int
-		numberOfRejects int
-		notification    string
+		name              string
+		error             error
+		numberOfAcks      int
+		numberOfNacks     int
+		numberOfRejects   int
+		notification      string
+		errorNotification string
 	}{
 		{
 			name:         "ok",
@@ -130,22 +131,24 @@ func Test_HandleDelivery(t *testing.T) {
 			numberOfAcks: 1,
 		},
 		{
-			name:          "invalid JSON",
-			error:         ErrParseJSON,
-			notification:  "error: failed to parse",
-			numberOfNacks: 1,
+			name:              "invalid JSON",
+			error:             ErrParseJSON,
+			errorNotification: "error: failed to parse",
+			numberOfNacks:     1,
 		},
 		{
-			name:            "no match for routingkey",
-			error:           ErrNoMessageTypeForRouteKey,
-			notification:    "error: no message type for routingkey configured",
-			numberOfRejects: 1,
+			name:              "no match for routingkey",
+			error:             ErrNoMessageTypeForRouteKey,
+			errorNotification: "error: no message type for routingkey configured",
+			numberOfRejects:   1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			errorNotifications := make(chan ErrorNotification, 1)
 			notifications := make(chan Notification, 1)
 			consumer := queueConsumer{
+				errorCh:        errorNotifications,
 				notificationCh: notifications,
 			}
 			deliveryInfo := DeliveryInfo{
@@ -161,8 +164,14 @@ func Test_HandleDelivery(t *testing.T) {
 			}
 			d := delivery(acker, "routingKey", true)
 			consumer.handleDelivery(handler, d, deliveryInfo)
-			notification := <-notifications
-			require.Contains(t, notification.Message, tt.notification)
+			if tt.notification != "" {
+				notification := <-notifications
+				require.Contains(t, notification.Message, tt.notification)
+			}
+			if tt.errorNotification != "" {
+				notification := <-errorNotifications
+				require.ErrorContains(t, notification.Error, tt.errorNotification)
+			}
 
 			require.Len(t, acker.Acks, tt.numberOfAcks)
 			require.Len(t, acker.Nacks, tt.numberOfNacks)

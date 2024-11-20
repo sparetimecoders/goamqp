@@ -68,10 +68,18 @@ func WithPrefetchLimit(limit int) Setup {
 }
 
 // WithNotificationChannel specifies a go channel to receive messages
-// such as connection established, reconnecting, event published, consumed, etc.
+// such as connection event published, consumed, etc.
 func WithNotificationChannel(notificationCh chan<- Notification) Setup {
 	return func(conn *Connection) error {
 		conn.notificationCh = notificationCh
+		return nil
+	}
+}
+
+// WithErrorChannel specifies a go channel to receive messages such as event failed
+func WithErrorChannel(errorCh chan<- ErrorNotification) Setup {
+	return func(conn *Connection) error {
+		conn.errorCh = errorCh
 		return nil
 	}
 }
