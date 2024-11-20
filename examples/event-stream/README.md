@@ -6,24 +6,25 @@ and routing keys.
 Let's start with the `Publisher`
 
 ```go
-orderPublisher := Must(NewPublisher(
-    Route{Type: OrderCreated{}, Key: "Order.Created"},
-    Route{Type: OrderUpdated{}, Key: "Order.Updated"}))
+orderPublisher := NewPublisher()
 ```
 
-The created `orderPublisher` can now be used to publish both `OrderCreated` and `OrderCreated`  for  different routing
-keys.
-Let's attach it to the stream
+The created `orderPublisher` can now be used to publish both `OrderCreated` and `OrderCreated` for different routing
+keys when we start.
 
 ```go
-orderServiceConnection.Start(EventStreamPublisher(orderPublisher))
+orderServiceConnection.Start(
+    EventStreamPublisher(orderPublisher),
+    WithTypeMapping("Order.Created", OrderCreated{}),
+    WithTypeMapping("Order.Updated", OrderUpdated{}),
+)
 ```
 
 No we can publish events:
 
 ```go
-orderPublisher.Publish(OrderCreated{Id: "id"})
-orderPublisher.Publish(OrderUpdated{Id: "id"})
+orderPublisher.Publish(context.Background(), OrderCreated{Id: "id"})
+orderPublisher.Publish(context.Background(), OrderUpdated{Id: "id", Data: "data"})
 ```
 
 Since no one is consuming the events they will of course just be dropped. Let's set up some consumers as well
@@ -31,28 +32,32 @@ Since no one is consuming the events they will of course just be dropped. Let's 
 The Stat service is only interested in created orders, so we just consume those events:
 ```go
 connection = Must(NewFromURL("stat-service", amqpURL))
-connection.Start(
-    EventStreamConsumer("Order.Created", handleOrderEvent, OrderCreated{}),
+connection.Start(ctx,
+    EventStreamConsumer("Order.Created", s.handleOrderCreated),
 )
+
 ...
 
-func handleOrderEvent(msg any, headers Headers) (response any, err error) {
-	switch msg.(type) {
-	case *OrderCreated:
-		fmt.Println("Increasing order count")
-	default:
-		fmt.Println("Unknown message type")
-	}
-	return nil, nil
+func (s *StatService) handleOrderCreated(ctx context.Context, msg ConsumableEvent[OrderCreated]) error {
+    fmt.Printf("Created order: %s", msg.Payload.Id)
+    return nil
 }
 ```
 
 The Shipping service is interested in all events for orders:
 ```go
-connection = Must(NewFromURL("shipping-service", amqpURL))
-connection.Start(
-    EventStreamConsumer("Order.Created", s.handleOrderEvent, OrderCreated{}),
-    EventStreamConsumer("Order.Updated", s.handleOrderEvent, OrderUpdated{}),
+connection.Start(ctx,
+    WithTypeMapping("Order.Created", OrderCreated{}),
+    WithTypeMapping("Order.Updated", OrderUpdated{}),
+    EventStreamConsumer("#", TypeMappingHandler(func(ctx context.Context, event ConsumableEvent[any]) error {
+      switch event.Payload.(type) {
+      case *OrderCreated:
+        s.output = append(s.output, "Order created")
+      case *OrderUpdated:
+        s.output = append(s.output, "Order deleted")
+      }
+        return nil
+    }),
 )
 ...
 
