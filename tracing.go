@@ -50,5 +50,5 @@ func extractToContext(headers amqp.Table) context.Context {
 		}
 	}
 
-	return otel.GetTextMapPropagator().Extract(context.TODO(), carrier)
+	return otel.GetTextMapPropagator().Extract(context.Background(), carrier)
 }

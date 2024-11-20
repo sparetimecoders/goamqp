@@ -46,6 +46,7 @@ type Connection struct {
 	typeToKey      typeToRoutingKey
 	keyToType      routingKeyToType
 	notificationCh chan<- Notification
+	errorCh        chan<- ErrorNotification
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
@@ -233,7 +234,7 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 
 func (c *Connection) setup() error {
 	for _, consumer := range *c.queueConsumers {
-		if deliveries, err := consumer.consume(c.channel, c.keyToType, c.notificationCh); err != nil {
+		if deliveries, err := consumer.consume(c.channel, c.keyToType, c.notificationCh, c.errorCh); err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", consumer.queue, err)
 		} else {
 			go consumer.loop(deliveries)

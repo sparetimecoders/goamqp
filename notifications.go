@@ -30,35 +30,29 @@ const (
 	NotificationSourceConsumer NotificationSource = "CONSUMER"
 )
 
-type NotificationType string
-
-const (
-	NotificationTypeInfo  NotificationType = "INFO"
-	NotificationTypeError NotificationType = "ERROR"
-)
-
 type Notification struct {
 	Message string
-	Type    NotificationType
 	Source  NotificationSource
+}
+type ErrorNotification struct {
+	Error  error
+	Source NotificationSource
 }
 
 func notifyEventHandlerSucceed(ch chan<- Notification, routingKey string, took int64) {
 	if ch != nil {
 		ch <- Notification{
-			Type:    NotificationTypeInfo,
 			Message: fmt.Sprintf("event handler for %s succeeded, took %d milliseconds", routingKey, took),
 			Source:  NotificationSourceConsumer,
 		}
 	}
 }
 
-func notifyEventHandlerFailed(ch chan<- Notification, routingKey string, took int64, err error) {
+func notifyEventHandlerFailed(ch chan<- ErrorNotification, routingKey string, took int64, err error) {
 	if ch != nil {
-		ch <- Notification{
-			Type:    NotificationTypeError,
-			Message: fmt.Sprintf("event handler for %s failed, took %d milliseconds, error: %s", routingKey, took, err),
-			Source:  NotificationSourceConsumer,
+		ch <- ErrorNotification{
+			Error:  fmt.Errorf("event handler for %s failed, took %d milliseconds, error: %s", routingKey, took, err),
+			Source: NotificationSourceConsumer,
 		}
 	}
 }

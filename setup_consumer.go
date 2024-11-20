@@ -51,7 +51,7 @@ type (
 // handler func.
 func TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
 	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
-		message, exists := routingKeyToTypeFromContext(ctx, event)
+		message, exists := routingKeyToTypeFromContext(ctx, event.DeliveryInfo.RoutingKey)
 		if !exists {
 			return ErrNoMessageTypeForRouteKey
 		}
@@ -168,8 +168,7 @@ func injectRoutingKeyToTypeContext(ctx context.Context, keyToType routingKeyToTy
 	return context.WithValue(ctx, routingKeyToTypeCtxProperty, keyToType)
 }
 
-func routingKeyToTypeFromContext[T any](ctx context.Context, event ConsumableEvent[T]) (any, bool) {
-	routingKey := event.DeliveryInfo.RoutingKey
+func routingKeyToTypeFromContext(ctx context.Context, routingKey string) (any, bool) {
 	keyToType, ok := ctx.Value(routingKeyToTypeCtxProperty).(routingKeyToType)
 	if !ok {
 		return nil, false
