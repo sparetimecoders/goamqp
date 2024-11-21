@@ -22,31 +22,37 @@
 
 package goamqp
 
-import (
-	"testing"
+import "fmt"
 
-	"github.com/stretchr/testify/require"
+type NotificationSource string
+
+const (
+	NotificationSourceConsumer NotificationSource = "CONSUMER"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+type Notification struct {
+	Message string
+	Source  NotificationSource
+}
+type ErrorNotification struct {
+	Error  error
+	Source NotificationSource
+}
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
+func notifyEventHandlerSucceed(ch chan<- Notification, routingKey string, took int64) {
+	if ch != nil {
+		ch <- Notification{
+			Message: fmt.Sprintf("event handler for %s succeeded, took %d milliseconds", routingKey, took),
+			Source:  NotificationSourceConsumer,
+		}
+	}
+}
 
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+func notifyEventHandlerFailed(ch chan<- ErrorNotification, routingKey string, took int64, err error) {
+	if ch != nil {
+		ch <- ErrorNotification{
+			Error:  fmt.Errorf("event handler for %s failed, took %d milliseconds, error: %s", routingKey, took, err),
+			Source: NotificationSourceConsumer,
+		}
+	}
 }

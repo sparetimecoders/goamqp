@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,71 +24,33 @@ package goamqp
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
-	"runtime"
 	"runtime/debug"
 	"time"
 
-	"github.com/pkg/errors"
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/sparetimecoders/goamqp/internal/handlers"
 )
-
-// HandlerFunc is used to process an incoming message
-// If processing fails, an error should be returned and the message will be re-queued
-// The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
-type HandlerFunc func(msg any, headers Headers) (response any, err error)
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
 type Connection struct {
-	started       bool
-	serviceName   string
-	amqpUri       amqp.URI
-	connection    amqpConnection
-	channel       AmqpChannel
-	queueHandlers *handlers.QueueHandlers[messageHandlerInvoker]
-	// messageLogger defaults to noOpMessageLogger, can be overridden with UseMessageLogger
-	messageLogger MessageLogger
-	// errorLogF defaults to noOpLogger, can be overridden with UseLogger
-	errorLog  errorLog
-	typeToKey map[reflect.Type]string
-	keyToType map[string]reflect.Type
+	started        bool
+	serviceName    string
+	amqpUri        amqp.URI
+	connection     amqpConnection
+	channel        AmqpChannel
+	queueConsumers *queueConsumers
+	typeToKey      typeToRoutingKey
+	keyToType      routingKeyToType
+	notificationCh chan<- Notification
+	errorCh        chan<- ErrorNotification
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
-type ServiceResponsePublisher func(ctx context.Context, targetService, routingKey string, msg any) error
-
-// QueueBindingConfig is a wrapper around the actual amqp queue configuration
-type QueueBindingConfig struct {
-	routingKey   string
-	handler      HandlerFunc
-	eventType    eventType
-	queueName    string
-	exchangeName string
-	kind         kind
-	headers      amqp.Table
-}
-
-// QueueBindingConfigSetup is a setup function that takes a QueueBindingConfig and provide custom changes to the
-// configuration
-type QueueBindingConfigSetup func(config *QueueBindingConfig) error
-
-// AddQueueNameSuffix appends the provided suffix to the queue name
-// Useful when multiple consumers are needed for a routing key in the same service
-func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
-	return func(config *QueueBindingConfig) error {
-		if suffix == "" {
-			return ErrEmptySuffix
-		}
-		config.queueName = fmt.Sprintf("%s-%s", config.queueName, suffix)
-		return nil
-	}
-}
+type ServiceResponsePublisher[T any] func(ctx context.Context, targetService, routingKey string, event T) error
 
 var (
 	// ErrEmptySuffix returned when an empty suffix is passed
@@ -112,20 +74,9 @@ func NewFromURL(serviceName string, amqpURL string) (*Connection, error) {
 	return newConnection(serviceName, uri), nil
 }
 
-// Must is a helper that wraps a call to a function returning (*T, error)
-// and panics if the error is non-nil. It is intended for use in variable
-// initializations such as
-// var c = goamqp.Must(goamqp.NewFromURL("service", "amqp://"))
-func Must[T any](t *T, err error) *T {
-	if err != nil {
-		panic(err)
-	}
-	return t
-}
-
 // PublishServiceResponse sends a message to targetService as a handler response
 func (c *Connection) PublishServiceResponse(ctx context.Context, targetService, routingKey string, msg any) error {
-	return c.publishMessage(ctx, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
+	return publishMessage(ctx, c.channel, msg, routingKey, serviceResponseExchangeName(c.serviceName), amqp.Table{headerService: targetService})
 }
 
 func (c *Connection) URI() amqp.URI {
@@ -137,8 +88,6 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 	if c.started {
 		return ErrAlreadyStarted
 	}
-	c.messageLogger = noOpMessageLogger()
-	c.errorLog = noOpLogger
 	if c.channel == nil {
 		err := c.connectToAmqpURL()
 		if err != nil {
@@ -172,54 +121,6 @@ func (c *Connection) Close() error {
 	return c.connection.Close()
 }
 
-func (c *Connection) TypeMappingHandler(handler HandlerFunc) HandlerFunc {
-	return func(msg any, headers Headers) (response any, err error) {
-		routingKey := headers["routing-key"].(string)
-		typ, exists := c.keyToType[routingKey]
-		if !exists {
-			return nil, nil
-		}
-		body := []byte(*msg.(*json.RawMessage))
-		message, err := c.parseMessage(body, typ)
-		if err != nil {
-			return nil, err
-		} else {
-			if resp, err := handler(message, headers); err == nil {
-				return resp, nil
-			} else {
-				return nil, err
-			}
-		}
-	}
-}
-
-// AmqpChannel wraps the amqp.Channel to allow for mocking
-type AmqpChannel interface {
-	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
-	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
-	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
-	// Deprecated: Use PublishWithContext instead.
-	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
-	PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
-	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
-	NotifyPublish(confirm chan amqp.Confirmation) chan amqp.Confirmation
-	NotifyClose(c chan *amqp.Error) chan *amqp.Error
-	Confirm(noWait bool) error
-	// Qos controls how many messages or how many bytes the server will try to keep on
-	// the network for consumers before receiving delivery acks.  The intent of Qos is
-	// to make sure the network buffers stay full between the server and client.
-	// If your consumer work time is reasonably consistent and not much greater
-	// than two times your network round trip time, you will see significant
-	// throughput improvements starting with a prefetch count of 2 or slightly
-	// greater as described by benchmarks on RabbitMQ.
-	//
-	// http://www.rabbitmq.com/blog/2012/04/25/rabbitmq-performance-measurements-part-2/
-	// The default prefetchCount is 20 (and global true) and can be overridden with WithPrefetchLimit
-	Qos(prefetchCount, prefetchSize int, global bool) error
-}
-
-var _ AmqpChannel = &amqp.Channel{}
-
 type amqpConnection interface {
 	io.Closer
 	Channel() (*amqp.Channel, error)
@@ -231,7 +132,7 @@ func dialConfig(url string, cfg amqp.Config) (amqpConnection, error) {
 
 var dialAmqp = dialConfig
 
-func amqpVersion() string {
+func version() string {
 	// NOTE: this doesn't work outside of a build, se we can't really test it
 	if x, ok := debug.ReadBuildInfo(); ok {
 		for _, y := range x.Deps {
@@ -243,70 +144,13 @@ func amqpVersion() string {
 	return "_unknown_"
 }
 
-func responseWrapper(handler HandlerFunc, routingKey string, publisher ServiceResponsePublisher) HandlerFunc {
-	return func(msg any, headers Headers) (response any, err error) {
-		resp, err := handler(msg, headers)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to process message")
-		}
-		if resp != nil {
-			service, err := sendingService(headers)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to extract service name")
-			}
-			// TODO Pass context to HandlerFunc instead and use here?
-			ctx := context.Background()
-			err = publisher(ctx, service, routingKey, resp)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to publish response")
-			}
-			return resp, nil
-		}
-		return nil, nil
-	}
-}
-
-func consume(channel AmqpChannel, queue string) (<-chan amqp.Delivery, error) {
-	return channel.Consume(
-		queue,
-		"",
-		false,
-		false,
-		false,
-		false,
-		amqp.Table{},
-	)
-}
-
-func queueDeclare(channel AmqpChannel, name string) error {
-	_, err := channel.QueueDeclare(name,
-		true,
-		false,
-		false,
-		false,
-		queueDeclareExpiration,
-	)
-	return err
-}
-
-func transientQueueDeclare(channel AmqpChannel, name string) error {
-	_, err := channel.QueueDeclare(name,
-		false,
-		true,
-		false,
-		false,
-		queueDeclareExpiration,
-	)
-	return err
-}
-
 func amqpConfig(serviceName string) amqp.Config {
 	config := amqp.Config{
 		Properties: amqp.NewConnectionProperties(),
 		Heartbeat:  10 * time.Second,
 		Locale:     "en_US",
 	}
-	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, amqpVersion(), hostName()))
+	config.Properties.SetClientConnectionName(fmt.Sprintf("%s#%+v#@%s", serviceName, version(), hostName()))
 	return config
 }
 
@@ -335,99 +179,27 @@ func (c *Connection) connectToAmqpURL() error {
 	return nil
 }
 
-func (c *Connection) exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
-	args := amqp.Table{}
-
-	return channel.ExchangeDeclare(
-		name,
-		string(kind),
-		true,
-		false,
-		false,
-		false,
-		args,
-	)
-}
-
-func (c *Connection) addHandler(queueName, routingKey string, eventType eventType, mHI *messageHandlerInvoker) error {
-	return c.queueHandlers.Add(queueName, routingKey, mHI)
-}
-
-func (c *Connection) handleMessage(d amqp.Delivery, handler HandlerFunc, eventType eventType) {
-	message, err := c.parseMessage(d.Body, eventType)
-	if err != nil {
-		c.errorLog(fmt.Sprintf("failed to parse message %s", err))
-		_ = d.Reject(false)
-	} else {
-		if _, err := handler(message, headers(d.Headers, d.RoutingKey)); err == nil {
-			_ = d.Ack(false)
-		} else {
-			if !errors.Is(err, ErrRecoverable) {
-				c.errorLog(fmt.Sprintf("failed to process message %s", err))
-			}
-			_ = d.Nack(false, true)
-		}
-	}
-}
-
-func (c *Connection) parseMessage(jsonContent []byte, eventType eventType) (any, error) {
-	target := reflect.New(eventType).Interface()
-	if err := json.Unmarshal(jsonContent, &target); err != nil {
-		return nil, err
-	}
-
-	return target, nil
-}
-
-func (c *Connection) publishMessage(ctx context.Context, msg any, routingKey, exchangeName string, headers amqp.Table) error {
-	jsonBytes, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	c.messageLogger(jsonBytes, reflect.TypeOf(msg), routingKey, true)
-
-	publishing := amqp.Publishing{
-		Body:         jsonBytes,
-		ContentType:  contentType,
-		DeliveryMode: 2,
-		Headers:      headers,
-	}
-
-	return c.channel.PublishWithContext(ctx, exchangeName,
-		routingKey,
-		false,
-		false,
-		publishing,
-	)
-}
-
-func (c *Connection) divertToMessageHandlers(deliveries <-chan amqp.Delivery, handlers *handlers.Handlers[messageHandlerInvoker]) {
-	for d := range deliveries {
-		if h, ok := handlers.Get(d.RoutingKey); ok {
-			c.messageLogger(d.Body, h.eventType, d.RoutingKey, false)
-			c.handleMessage(d, h.msgHandler, h.eventType)
-		} else {
-			// Unhandled message, drop it
-			_ = d.Reject(false)
-		}
-	}
-}
-
 func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) error {
-	if err := c.addHandler(cfg.queueName, cfg.routingKey, cfg.eventType, &messageHandlerInvoker{
-		msgHandler: cfg.handler,
-		eventType:  cfg.eventType,
-	}); err != nil {
+	if err := c.queueConsumers.add(cfg.queueName, cfg.routingKey, cfg.handler); err != nil {
 		return err
 	}
 
-	if err := c.exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
+	if err := exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
 		return err
 	}
-	if err := queueDeclare(c.channel, cfg.queueName); err != nil {
+	if err := queueDeclare(c.channel, cfg.queueName, cfg.transient); err != nil {
 		return err
 	}
 	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.headers)
+}
+
+func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
+	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
+}
+
+func queueDeclare(channel AmqpChannel, name string, transient bool) error {
+	_, err := channel.QueueDeclare(name, !transient, transient, false, false, queueDeclareExpiration)
+	return err
 }
 
 type kind string
@@ -452,57 +224,25 @@ var (
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
-		serviceName:   serviceName,
-		amqpUri:       uri,
-		queueHandlers: &handlers.QueueHandlers[messageHandlerInvoker]{},
-		keyToType:     make(map[string]reflect.Type),
-		typeToKey:     make(map[reflect.Type]string),
+		serviceName:    serviceName,
+		amqpUri:        uri,
+		queueConsumers: &queueConsumers{},
+		keyToType:      make(map[string]reflect.Type),
+		typeToKey:      make(map[reflect.Type]string),
 	}
 }
 
 func (c *Connection) setup() error {
-	for _, queue := range c.queueHandlers.Queues() {
-		consumer, err := consume(c.channel, queue.Name)
-		if err != nil {
-			return fmt.Errorf("failed to create consumer for queue %s. %v", queue.Name, err)
+	for _, consumer := range *c.queueConsumers {
+		if deliveries, err := consumer.consume(c.channel, c.keyToType, c.notificationCh, c.errorCh); err != nil {
+			return fmt.Errorf("failed to create consumer for queue %s. %v", consumer.queue, err)
+		} else {
+			go consumer.loop(deliveries)
 		}
-		go c.divertToMessageHandlers(consumer, queue.Handlers)
 	}
 	return nil
 }
 
-func getEventType(eventType any) (eventType, error) {
-	if _, ok := eventType.(reflect.Type); ok {
-		return nil, ErrIllegalEventType
-	}
-	return reflect.TypeOf(eventType), nil
-}
+type routingKeyToType map[string]reflect.Type
 
-type eventType reflect.Type
-
-type messageHandlerInvoker struct {
-	msgHandler HandlerFunc
-	eventType  eventType
-}
-
-// getSetupFuncName returns the name of the Setup function
-func getSetupFuncName(f Setup) string {
-	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
-}
-
-// getQueueBindingConfigSetupFuncName returns the name of the QueueBindingConfigSetup function
-func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
-	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
-}
-
-// sendingService returns the name of the service that produced the message
-// Can be used to send a handlerResponse, see PublishServiceResponse
-func sendingService(headers Headers) (string, error) {
-	if h, exist := headers[headerService]; exist {
-		switch v := h.(type) {
-		case string:
-			return v, nil
-		}
-	}
-	return "", errors.New("no service found")
-}
+type typeToRoutingKey map[reflect.Type]string
