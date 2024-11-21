@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -359,14 +360,19 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	)
 	defer server.Close()
 
+	mutex := sync.Mutex{}
 	var received []any
 	client1 := createConnection(suite, "client1",
 		TransientEventStreamConsumer(routingKey1, func(ctx context.Context, msg ConsumableEvent[Incoming]) error {
+			mutex.Lock()
+			defer mutex.Unlock()
 			received = append(received, msg.Payload)
 			closer <- true
 			return nil
 		}),
 		EventStreamConsumer(routingKey2, func(ctx context.Context, msg ConsumableEvent[IncomingResponse]) error {
+			mutex.Lock()
+			defer mutex.Unlock()
 			received = append(received, msg.Payload)
 			closer <- true
 			return nil
