@@ -77,7 +77,7 @@ func (c *queueConsumer) handleDelivery(handler wrappedHandler, delivery amqp.Del
 	uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
 	if err := handler(handlerCtx, uevt); err != nil {
 		elapsed := time.Since(startTime).Milliseconds()
-		notifyEventHandlerFailed(c.errorCh, deliveryInfo.RoutingKey, elapsed, err)
+		notifyEventHandlerFailed(c.errorCh, deliveryInfo, elapsed, err)
 		if errors.Is(err, ErrParseJSON) {
 			eventNotParsable(deliveryInfo.Queue, deliveryInfo.RoutingKey)
 			_ = delivery.Nack(false, false)
@@ -92,7 +92,7 @@ func (c *queueConsumer) handleDelivery(handler wrappedHandler, delivery amqp.Del
 	}
 
 	elapsed := time.Since(startTime).Milliseconds()
-	notifyEventHandlerSucceed(c.notificationCh, deliveryInfo.RoutingKey, elapsed)
+	notifyEventHandlerSucceed(c.notificationCh, deliveryInfo, elapsed)
 	_ = delivery.Ack(false)
 	eventAck(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
 }
