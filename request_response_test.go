@@ -57,7 +57,7 @@ func Test_RequestResponseHandler(t *testing.T) {
 	require.Equal(t, 1, len(channel.BindingDeclarations))
 	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: nil}, channel.BindingDeclarations[0])
 
-	require.Len(t, *conn.queueConsumers, 1)
+	require.Len(t, (*conn).queueConsumers.consumers, 1)
 	handler, _ := conn.queueConsumers.get("svc.direct.exchange.request.queue", "key")
 	require.Equal(t, "github.com/sparetimecoders/goamqp.ServiceRequestConsumer[...].1", runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name())
 	missing, exists := conn.queueConsumers.get("miggins", "key")

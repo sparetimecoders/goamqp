@@ -129,10 +129,12 @@ func Test_Start_SetupFails(t *testing.T) {
 		},
 	}
 	conn := &Connection{
-		serviceName:    "test",
-		connection:     mockAmqpConnection,
-		channel:        mockChannel,
-		queueConsumers: &queueConsumers{},
+		serviceName: "test",
+		connection:  mockAmqpConnection,
+		channel:     mockChannel,
+		queueConsumers: &queueConsumers{
+			consumers: make(map[string]*queueConsumer),
+		},
 	}
 	err := conn.Start(context.Background(),
 		EventStreamConsumer("test", func(ctx context.Context, msg ConsumableEvent[Message]) error {
