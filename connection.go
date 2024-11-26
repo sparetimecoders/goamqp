@@ -24,7 +24,6 @@ package goamqp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -58,12 +57,6 @@ var (
 	ErrEmptySuffix = fmt.Errorf("empty queue suffix not allowed")
 	// ErrAlreadyStarted returned when Start is called multiple times
 	ErrAlreadyStarted = fmt.Errorf("already started")
-	// ErrIllegalEventType is returned when an illegal type is passed
-	ErrIllegalEventType = fmt.Errorf("passing reflect.TypeOf event types is not allowed")
-	// ErrNilLogger is returned if nil is passed as a logger func
-	ErrNilLogger = errors.New("cannot use nil as logger func")
-	// ErrRecoverable will not be logged during message processing
-	ErrRecoverable = errors.New("recoverable error")
 )
 
 // NewFromURL creates a new Connection from an URL

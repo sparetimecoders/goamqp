@@ -120,30 +120,25 @@ func Test_ConsumerLoop(t *testing.T) {
 
 func Test_HandleDelivery(t *testing.T) {
 	tests := []struct {
-		name              string
-		error             error
-		numberOfAcks      int
-		numberOfNacks     int
-		numberOfRejects   int
-		notification      string
-		errorNotification string
+		name            string
+		error           error
+		numberOfAcks    int
+		numberOfNacks   int
+		numberOfRejects int
 	}{
 		{
 			name:         "ok",
-			notification: "event handler for key succeeded",
 			numberOfAcks: 1,
 		},
 		{
-			name:              "invalid JSON",
-			error:             ErrParseJSON,
-			errorNotification: "error: failed to parse",
-			numberOfNacks:     1,
+			name:          "invalid JSON",
+			error:         ErrParseJSON,
+			numberOfNacks: 1,
 		},
 		{
-			name:              "no match for routingkey",
-			error:             ErrNoMessageTypeForRouteKey,
-			errorNotification: "error: no message type for routingkey configured",
-			numberOfRejects:   1,
+			name:            "no match for routingkey",
+			error:           ErrNoMessageTypeForRouteKey,
+			numberOfRejects: 1,
 		},
 	}
 	for _, tt := range tests {
@@ -170,13 +165,12 @@ func Test_HandleDelivery(t *testing.T) {
 			}
 			d := delivery(acker, "routingKey", true)
 			consumer.handleDelivery(handler, d, deliveryInfo)
-			if tt.notification != "" {
-				notification := <-notifications
-				require.Contains(t, notification.Message, tt.notification)
-			}
-			if tt.errorNotification != "" {
+			if tt.error != nil {
 				notification := <-errorNotifications
-				require.ErrorContains(t, notification.Error, tt.errorNotification)
+				require.EqualError(t, notification.Error, tt.error.Error())
+			} else {
+				notification := <-notifications
+				require.Contains(t, notification.DeliveryInfo.RoutingKey, "key")
 			}
 
 			require.Len(t, acker.Acks, tt.numberOfAcks)
