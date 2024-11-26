@@ -45,6 +45,24 @@ type (
 	RequestResponseEventHandler[T any, R any] func(ctx context.Context, event ConsumableEvent[T]) (R, error)
 )
 
+// HandlerFunc is used to process an incoming message
+// If processing fails, an error should be returned and the message will be re-queued
+// The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
+// Deprecated: only kept as a convenience for upgrading to new handler functions will be removed in future releases
+type HandlerFunc func(msg any, headers Headers) (response any, err error)
+
+// LegacyHandler provides a way to use old handler functions and type registration
+// Deprecated: only provided as a convenience for upgrading to new handler functions will be removed in future releases
+func LegacyHandler[T any](handler HandlerFunc, typ T) EventHandler[T] {
+	return func(ctx context.Context, event ConsumableEvent[T]) error {
+		_, err := handler(&event.Payload, event.DeliveryInfo.Headers)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
 // TypeMappingHandler wraps a Handler func into an EventHandler in order to use it with the different
 // Consumer Setup func.
 // It will use the mappings from WithTypeMapping to determine routing key -> actual event type and pass it to the

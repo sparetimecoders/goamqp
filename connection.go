@@ -47,6 +47,7 @@ type Connection struct {
 	keyToType      routingKeyToType
 	notificationCh chan<- Notification
 	errorCh        chan<- ErrorNotification
+	spanNameFn     func(DeliveryInfo) string
 }
 
 // ServiceResponsePublisher represents the function that is called to publish a response
@@ -224,16 +225,19 @@ var (
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
 	return &Connection{
-		serviceName:    serviceName,
-		amqpUri:        uri,
-		queueConsumers: &queueConsumers{},
-		keyToType:      make(map[string]reflect.Type),
-		typeToKey:      make(map[reflect.Type]string),
+		serviceName: serviceName,
+		amqpUri:     uri,
+		queueConsumers: &queueConsumers{
+			consumers:  make(map[string]*queueConsumer),
+			spanNameFn: spanNameFn,
+		},
+		keyToType: make(map[string]reflect.Type),
+		typeToKey: make(map[reflect.Type]string),
 	}
 }
 
 func (c *Connection) setup() error {
-	for _, consumer := range *c.queueConsumers {
+	for _, consumer := range (*c).queueConsumers.consumers {
 		if deliveries, err := consumer.consume(c.channel, c.keyToType, c.notificationCh, c.errorCh); err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", consumer.queue, err)
 		} else {

@@ -50,6 +50,12 @@ func NewPublisher() *Publisher {
 	return &Publisher{}
 }
 
+// PublishWithContext wraps Publish to ease migration to new version of goamqp
+// Deprecated: use Publish directly
+func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...Header) error {
+	return p.Publish(ctx, msg, headers...)
+}
+
 // Publish tries to publish msg to AMQP.
 // It requires RoutingKey <-> Type mappings from WithTypeMapping in order to set the correct Routing Key for msg
 func (p *Publisher) Publish(ctx context.Context, msg any, headers ...Header) error {

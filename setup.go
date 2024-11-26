@@ -84,6 +84,19 @@ func WithErrorChannel(errorCh chan<- ErrorNotification) Setup {
 	}
 }
 
+var spanNameFn = func(info DeliveryInfo) string {
+	return fmt.Sprintf("%s#%s", trimExchangeFromQueue(info.Queue, info.Exchange), info.RoutingKey)
+}
+
+// WithSpanNameFn specifies a function that will get called when a new span is created
+// By default the spanNameFn will be used
+func WithSpanNameFn(f func(DeliveryInfo) string) Setup {
+	return func(conn *Connection) error {
+		conn.spanNameFn = f
+		return nil
+	}
+}
+
 // CloseListener receives a callback when the AMQP Channel gets closed
 func CloseListener(e chan error) Setup {
 	return func(c *Connection) error {

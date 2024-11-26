@@ -96,6 +96,9 @@ func Test_ConsumerLoop(t *testing.T) {
 
 	consumer := queueConsumer{
 		handlers: routingKeyHandler{},
+		spanNameFn: func(info DeliveryInfo) string {
+			return "span"
+		},
 	}
 	consumer.handlers.add("key1", handler)
 	consumer.handlers.add("key2", handler)
@@ -150,6 +153,9 @@ func Test_HandleDelivery(t *testing.T) {
 			consumer := queueConsumer{
 				errorCh:        errorNotifications,
 				notificationCh: notifications,
+				spanNameFn: func(info DeliveryInfo) string {
+					return "span"
+				},
 			}
 			deliveryInfo := DeliveryInfo{
 				RoutingKey: "key",

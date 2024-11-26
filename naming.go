@@ -24,6 +24,7 @@ package goamqp
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -60,4 +61,8 @@ func serviceResponseQueueName(targetService, serviceName string) string {
 
 func randomString() string {
 	return uuid.New().String()
+}
+
+func trimExchangeFromQueue(queueName, exchangeName string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(queueName, exchangeName), ".")
 }

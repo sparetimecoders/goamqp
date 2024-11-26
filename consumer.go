@@ -23,14 +23,12 @@
 package goamqp
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type queueConsumer struct {
@@ -39,6 +37,7 @@ type queueConsumer struct {
 	routingKeyToType routingKeyToType
 	notificationCh   chan<- Notification
 	errorCh          chan<- ErrorNotification
+	spanNameFn       func(info DeliveryInfo) string
 }
 
 func (c *queueConsumer) consume(channel AmqpChannel, routingKeyToType routingKeyToType, notificationCh chan<- Notification, errorCh chan<- ErrorNotification) (<-chan amqp.Delivery, error) {
@@ -69,11 +68,8 @@ func (c *queueConsumer) loop(deliveries <-chan amqp.Delivery) {
 }
 
 func (c *queueConsumer) handleDelivery(handler wrappedHandler, delivery amqp.Delivery, deliveryInfo DeliveryInfo) {
-	tracingCtx := extractToContext(delivery.Headers)
-	span := trace.SpanFromContext(tracingCtx)
-	if !span.SpanContext().IsValid() {
-		tracingCtx, span = otel.Tracer("amqp").Start(context.Background(), fmt.Sprintf("%s#%s", deliveryInfo.Queue, delivery.RoutingKey))
-	}
+	headerCtx := extractToContext(delivery.Headers)
+	tracingCtx, span := otel.Tracer("amqp").Start(headerCtx, c.spanNameFn(deliveryInfo))
 	defer span.End()
 	handlerCtx := injectRoutingKeyToTypeContext(tracingCtx, c.routingKeyToType)
 	startTime := time.Now()
@@ -101,10 +97,13 @@ func (c *queueConsumer) handleDelivery(handler wrappedHandler, delivery amqp.Del
 	eventAck(deliveryInfo.Queue, deliveryInfo.RoutingKey, elapsed)
 }
 
-type queueConsumers map[string]*queueConsumer
+type queueConsumers struct {
+	consumers  map[string]*queueConsumer
+	spanNameFn func(info DeliveryInfo) string
+}
 
 func (c *queueConsumers) get(queueName, routingKey string) (wrappedHandler, bool) {
-	consumerForQueue, ok := (*c)[queueName]
+	consumerForQueue, ok := (*c).consumers[queueName]
 	if !ok {
 		return nil, false
 	}
@@ -112,13 +111,14 @@ func (c *queueConsumers) get(queueName, routingKey string) (wrappedHandler, bool
 }
 
 func (c *queueConsumers) add(queueName, routingKey string, handler wrappedHandler) error {
-	consumerForQueue, ok := (*c)[queueName]
+	consumerForQueue, ok := (*c).consumers[queueName]
 	if !ok {
 		consumerForQueue = &queueConsumer{
-			queue:    queueName,
-			handlers: make(routingKeyHandler),
+			queue:      queueName,
+			handlers:   make(routingKeyHandler),
+			spanNameFn: c.spanNameFn,
 		}
-		(*c)[queueName] = consumerForQueue
+		(*c).consumers[queueName] = consumerForQueue
 	}
 	if mappedRoutingKey, exists := consumerForQueue.handlers.exists(routingKey); exists {
 		return fmt.Errorf("routingkey %s overlaps %s for queue %s, consider using AddQueueNameSuffix", routingKey, mappedRoutingKey, queueName)
