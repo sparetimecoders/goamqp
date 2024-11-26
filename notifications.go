@@ -22,8 +22,6 @@
 
 package goamqp
 
-import "fmt"
-
 type NotificationSource string
 
 const (
@@ -31,28 +29,42 @@ const (
 )
 
 type Notification struct {
-	Message string
-	Source  NotificationSource
+	DeliveryInfo DeliveryInfo
+	Duration     int64
+	Source       NotificationSource
 }
 type ErrorNotification struct {
-	Error  error
-	Source NotificationSource
+	Error        error
+	DeliveryInfo DeliveryInfo
+	Source       NotificationSource
+	Duration     int64
 }
 
-func notifyEventHandlerSucceed(ch chan<- Notification, routingKey string, took int64) {
+func notifyEventHandlerSucceed(ch chan<- Notification, info DeliveryInfo, took int64) {
 	if ch != nil {
-		ch <- Notification{
-			Message: fmt.Sprintf("event handler for %s succeeded, took %d milliseconds", routingKey, took),
-			Source:  NotificationSourceConsumer,
+		select {
+		case ch <- Notification{
+			DeliveryInfo: info,
+			Source:       NotificationSourceConsumer,
+			Duration:     took,
+		}:
+		default:
+			// Channel full, or not handling messages
 		}
 	}
 }
 
-func notifyEventHandlerFailed(ch chan<- ErrorNotification, routingKey string, took int64, err error) {
+func notifyEventHandlerFailed(ch chan<- ErrorNotification, info DeliveryInfo, took int64, err error) {
 	if ch != nil {
-		ch <- ErrorNotification{
-			Error:  fmt.Errorf("event handler for %s failed, took %d milliseconds, error: %s", routingKey, took, err),
-			Source: NotificationSourceConsumer,
+		select {
+		case ch <- ErrorNotification{
+			Error:        err,
+			DeliveryInfo: info,
+			Source:       NotificationSourceConsumer,
+			Duration:     took,
+		}:
+		default:
+			// Channel full, or not handling messages
 		}
 	}
 }
