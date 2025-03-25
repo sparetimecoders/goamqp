@@ -39,7 +39,7 @@ func TestStdoutLogger(t *testing.T) {
 	os.Stdout = file
 	logger([]byte(`{"key":"value"}`), reflect.TypeOf(Connection{}), "key", false)
 	os.Stdout = stdout
-	file.Close()
+	require.NoError(t, file.Close())
 	all, err := os.ReadFile(file.Name())
 	require.NoError(t, err)
 	require.Equal(t, "Received [goamqp.Connection] from routingkey: 'key' with content:\n{\n\t\"key\": \"value\"\n}\n", string(all))

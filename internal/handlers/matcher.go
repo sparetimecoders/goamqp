@@ -54,6 +54,6 @@ func match(pattern string, routingKey string) bool {
 // user.* => user\.[^.]*
 // user.# => user\..*
 func fixRegex(s string) string {
-	replace := strings.Replace(strings.Replace(strings.Replace(s, ".", "\\.", -1), "*", "[^.]*", -1), "#", ".*", -1)
+	replace := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s, ".", "\\."), "*", "[^.]*"), "#", ".*")
 	return fmt.Sprintf("^%s$", replace)
 }
