@@ -263,7 +263,7 @@ func Test_TransientQueueDeclare(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(channel.QueueDeclarations))
-	require.Equal(t, QueueDeclaration{name: "test", durable: false, autoDelete: true, noWait: false, args: amqp.Table{"x-expires": int(deleteQueueAfter.Seconds() * 1000)}}, channel.QueueDeclarations[0])
+	require.Equal(t, QueueDeclaration{name: "test", durable: false, autoDelete: true, exclusive: true, noWait: false, args: amqp.Table{"x-expires": int(deleteQueueAfter.Seconds() * 1000)}}, channel.QueueDeclarations[0])
 }
 
 func Test_ExchangeDeclare(t *testing.T) {

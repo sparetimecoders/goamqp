@@ -44,6 +44,7 @@ type QueueDeclaration struct {
 	name       string
 	durable    bool
 	autoDelete bool
+	exclusive  bool
 	noWait     bool
 	args       amqp.Table
 }
@@ -205,7 +206,7 @@ func (m *MockAmqpChannel) QueueDeclare(name string, durable, autoDelete, exclusi
 		return amqp.Queue{}, *m.QueueDeclarationError
 	}
 
-	m.QueueDeclarations = append(m.QueueDeclarations, QueueDeclaration{name, durable, autoDelete, noWait, args})
+	m.QueueDeclarations = append(m.QueueDeclarations, QueueDeclaration{name, durable, autoDelete, exclusive, noWait, args})
 	return amqp.Queue{}, nil
 }
 

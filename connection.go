@@ -293,7 +293,7 @@ func transientQueueDeclare(channel AmqpChannel, name string) error {
 	_, err := channel.QueueDeclare(name,
 		false,
 		true,
-		false,
+		true,
 		false,
 		queueDeclareExpiration,
 	)
