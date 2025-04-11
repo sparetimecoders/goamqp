@@ -33,7 +33,7 @@ import (
 
 var amqpURL = "amqp://user:password@localhost:5672"
 
-func ExampleEventStream() {
+func Example_event_stream() {
 	ctx := context.Background()
 	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
 		amqpURL = urlFromEnv
