@@ -30,12 +30,12 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// QueueBindingConfigSetup is a setup function that takes a QueueBindingConfig and provide custom changes to the
+// ConsumerOptions is a setup function that takes a ConsumerConfig and provide custom changes to the
 // configuration
-type QueueBindingConfigSetup func(config *QueueBindingConfig) error
+type ConsumerOptions func(config *ConsumerConfig) error
 
-// QueueBindingConfig is a wrapper around the actual amqp queue configuration
-type QueueBindingConfig struct {
+// ConsumerConfig is a wrapper around the actual amqp queue configuration
+type ConsumerConfig struct {
 	routingKey          string
 	handler             wrappedHandler
 	queueName           string
@@ -47,8 +47,8 @@ type QueueBindingConfig struct {
 
 // AddQueueNameSuffix appends the provided suffix to the queue name
 // Useful when multiple queueConsumers are needed for a routing key in the same service
-func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
-	return func(config *QueueBindingConfig) error {
+func AddQueueNameSuffix(suffix string) ConsumerOptions {
+	return func(config *ConsumerConfig) error {
 		if suffix == "" {
 			return ErrEmptySuffix
 		}
@@ -59,14 +59,14 @@ func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
 
 // DisableSingleActiveConsumer will define the queue as non exclusive and set the x-single-active-consumer header to false
 // https://www.rabbitmq.com/docs/consumers#exclusivity
-func DisableSingleActiveConsumer() QueueBindingConfigSetup {
-	return func(config *QueueBindingConfig) error {
+func DisableSingleActiveConsumer() ConsumerOptions {
+	return func(config *ConsumerConfig) error {
 		config.queueHeaders[headerSingleActiveConsumer] = false
 		return nil
 	}
 }
 
-// getQueueBindingConfigSetupFuncName returns the name of the QueueBindingConfigSetup function
-func getQueueBindingConfigSetupFuncName(f QueueBindingConfigSetup) string {
+// getQueueBindingConfigSetupFuncName returns the name of the ConsumerOptions function
+func getQueueBindingConfigSetupFuncName(f ConsumerOptions) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }

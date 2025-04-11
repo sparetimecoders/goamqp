@@ -29,11 +29,11 @@ import (
 )
 
 func TestEmptyQueueNameSuffix(t *testing.T) {
-	require.EqualError(t, AddQueueNameSuffix("")(&QueueBindingConfig{}), ErrEmptySuffix.Error())
+	require.EqualError(t, AddQueueNameSuffix("")(&ConsumerConfig{}), ErrEmptySuffix.Error())
 }
 
 func TestQueueNameSuffix(t *testing.T) {
-	cfg := &QueueBindingConfig{queueName: "queue"}
+	cfg := &ConsumerConfig{queueName: "queue"}
 	require.NoError(t, AddQueueNameSuffix("suffix")(cfg))
 	require.Equal(t, "queue-suffix", cfg.queueName)
 }

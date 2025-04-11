@@ -88,7 +88,7 @@ func TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
 
 // EventStreamConsumer sets up ap a durable, persistent event stream consumer.
 // For a transient queue, use the TransientEventStreamConsumer function instead.
-func EventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts ...QueueBindingConfigSetup) Setup {
+func EventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	return StreamConsumer(defaultEventExchangeName, routingKey, handler, opts...)
 }
 
@@ -96,7 +96,7 @@ func EventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts
 // It sets up ap a durable, persistent consumer (exchange->queue) for responses from targetService
 func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T]) Setup {
 	return func(c *Connection) error {
-		config := &QueueBindingConfig{
+		config := &ConsumerConfig{
 			routingKey:          routingKey,
 			handler:             newWrappedHandler(handler),
 			queueName:           serviceResponseQueueName(targetService, c.serviceName),
@@ -112,14 +112,14 @@ func ServiceResponseConsumer[T any](targetService, routingKey string, handler Ev
 
 // ServiceRequestConsumer is a specialization of EventStreamConsumer
 // It sets up ap a durable, persistent consumer (exchange->queue) for message to the service owning the Connection
-func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], opts ...QueueBindingConfigSetup) Setup {
+func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	return func(c *Connection) error {
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
 		if err := exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
 			return fmt.Errorf("failed to create exchange %s, %w", resExchangeName, err)
 		}
 
-		config := &QueueBindingConfig{
+		config := &ConsumerConfig{
 			routingKey:   routingKey,
 			handler:      newWrappedHandler(handler),
 			queueName:    serviceRequestQueueName(c.serviceName),
@@ -137,10 +137,10 @@ func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], o
 }
 
 // StreamConsumer sets up ap a durable, persistent event stream consumer.
-func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T], opts ...QueueBindingConfigSetup) Setup {
+func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		config := &QueueBindingConfig{
+		config := &ConsumerConfig{
 			routingKey:   routingKey,
 			handler:      newWrappedHandler(handler),
 			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
@@ -175,7 +175,7 @@ func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHa
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
 		headers := maps.Clone(defaultQueueOptions)
 		headers[headerExpires] = 1
-		config := &QueueBindingConfig{
+		config := &ConsumerConfig{
 			routingKey:   routingKey,
 			handler:      newWrappedHandler(handler),
 			queueName:    queueName,
