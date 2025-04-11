@@ -102,7 +102,7 @@ func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 	require.Equal(suite.T(), []Queue{{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "classic",
+			XQueueType: "quorum",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -188,7 +188,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "classic",
+			XQueueType: "quorum",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -214,7 +214,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "classic",
+			XQueueType: "quorum",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -294,7 +294,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "classic",
+			XQueueType: "quorum",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -323,7 +323,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "classic",
+			XQueueType: "quorum",
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -413,7 +413,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
 					XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-					XQueueType: "classic",
+					XQueueType: "quorum",
 				},
 				AutoDelete:           false,
 				Durable:              true,
@@ -434,11 +434,11 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		} else {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
-					XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-					XQueueType: "classic",
+					XExpires:   1,
+					XQueueType: "quorum",
 				},
-				AutoDelete:           true,
-				Durable:              false,
+				AutoDelete:           false,
+				Durable:              true,
 				Exclusive:            false,
 				ExclusiveConsumerTag: nil,
 				Name:                 q.Name,
@@ -461,7 +461,8 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	require.Equal(suite.T(), 2, len(queuesBeforeClose))
 
 	client1.Close()
-
+	// Give rabbit some time to remove queues with expiration
+	time.Sleep(5 * time.Second)
 	// Transient queues removed
 	queuesAfterClose, err := suite.admin.GetQueues()
 	require.NoError(suite.T(), err)
@@ -541,7 +542,7 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	require.Equal(suite.T(), Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "classic",
+			XQueueType: "quorum",
 		},
 		AutoDelete:           false,
 		Durable:              true,

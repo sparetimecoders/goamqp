@@ -88,11 +88,9 @@ func (c *Connection) Start(ctx context.Context, opts ...Setup) error {
 			return err
 		}
 	}
-
-	if err := c.channel.Qos(20, 0, true); err != nil {
+	if err := c.channel.Qos(20, 0, false); err != nil {
 		return err
 	}
-
 	for _, f := range opts {
 		if err := f(c); err != nil {
 			return fmt.Errorf("setup function <%s> failed, %v", getSetupFuncName(f), err)
@@ -181,18 +179,18 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *QueueBindingConfig) 
 	if err := exchangeDeclare(c.channel, cfg.exchangeName, cfg.kind); err != nil {
 		return err
 	}
-	if err := queueDeclare(c.channel, cfg.queueName, cfg.transient); err != nil {
+	if err := queueDeclare(c.channel, cfg); err != nil {
 		return err
 	}
-	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.headers)
+	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.queueBindingHeaders)
 }
 
 func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
 	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
 }
 
-func queueDeclare(channel AmqpChannel, name string, transient bool) error {
-	_, err := channel.QueueDeclare(name, !transient, transient, transient, false, queueDeclareExpiration)
+func queueDeclare(channel AmqpChannel, cfg *QueueBindingConfig) error {
+	_, err := channel.QueueDeclare(cfg.queueName, true, false, false, false, cfg.queueHeaders)
 	return err
 }
 
@@ -205,15 +203,20 @@ const (
 )
 
 const (
-	headerService = "service"
-	headerExpires = "x-expires"
+	headerService              = "service"
+	headerExpires              = "x-expires"
+	headerQueueType            = "x-queue-type"
+	headerSingleActiveConsumer = "x-single-active-consumer"
 )
 
 const contentType = "application/json"
 
 var (
-	deleteQueueAfter       = 5 * 24 * time.Hour
-	queueDeclareExpiration = amqp.Table{headerExpires: int(deleteQueueAfter.Seconds() * 1000)}
+	deleteQueueAfter    = 5 * 24 * time.Hour
+	defaultQueueOptions = amqp.Table{
+		headerQueueType:            "quorum",
+		headerSingleActiveConsumer: true,
+		headerExpires:              int(deleteQueueAfter.Seconds() * 1000)}
 )
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {

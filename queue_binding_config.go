@@ -36,13 +36,13 @@ type QueueBindingConfigSetup func(config *QueueBindingConfig) error
 
 // QueueBindingConfig is a wrapper around the actual amqp queue configuration
 type QueueBindingConfig struct {
-	routingKey   string
-	handler      wrappedHandler
-	queueName    string
-	exchangeName string
-	kind         kind
-	headers      amqp.Table
-	transient    bool
+	routingKey          string
+	handler             wrappedHandler
+	queueName           string
+	exchangeName        string
+	kind                kind
+	queueHeaders        amqp.Table
+	queueBindingHeaders amqp.Table
 }
 
 // AddQueueNameSuffix appends the provided suffix to the queue name
@@ -53,6 +53,15 @@ func AddQueueNameSuffix(suffix string) QueueBindingConfigSetup {
 			return ErrEmptySuffix
 		}
 		config.queueName = fmt.Sprintf("%s-%s", config.queueName, suffix)
+		return nil
+	}
+}
+
+// DisableSingleActiveConsumer will define the queue as non exclusive and set the x-single-active-consumer header to false
+// https://www.rabbitmq.com/docs/consumers#exclusivity
+func DisableSingleActiveConsumer() QueueBindingConfigSetup {
+	return func(config *QueueBindingConfig) error {
+		config.queueHeaders[headerSingleActiveConsumer] = false
 		return nil
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -96,12 +97,13 @@ func EventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts
 func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T]) Setup {
 	return func(c *Connection) error {
 		config := &QueueBindingConfig{
-			routingKey:   routingKey,
-			handler:      newWrappedHandler(handler),
-			queueName:    serviceResponseQueueName(targetService, c.serviceName),
-			exchangeName: serviceResponseExchangeName(targetService),
-			kind:         kindHeaders,
-			headers:      amqp.Table{headerService: c.serviceName},
+			routingKey:          routingKey,
+			handler:             newWrappedHandler(handler),
+			queueName:           serviceResponseQueueName(targetService, c.serviceName),
+			exchangeName:        serviceResponseExchangeName(targetService),
+			kind:                kindHeaders,
+			queueBindingHeaders: amqp.Table{headerService: c.serviceName},
+			queueHeaders:        maps.Clone(defaultQueueOptions),
 		}
 
 		return c.messageHandlerBindQueueToExchange(config)
@@ -110,7 +112,7 @@ func ServiceResponseConsumer[T any](targetService, routingKey string, handler Ev
 
 // ServiceRequestConsumer is a specialization of EventStreamConsumer
 // It sets up ap a durable, persistent consumer (exchange->queue) for message to the service owning the Connection
-func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T]) Setup {
+func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], opts ...QueueBindingConfigSetup) Setup {
 	return func(c *Connection) error {
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
 		if err := exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
@@ -123,8 +125,13 @@ func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T]) S
 			queueName:    serviceRequestQueueName(c.serviceName),
 			exchangeName: serviceRequestExchangeName(c.serviceName),
 			kind:         kindDirect,
+			queueHeaders: maps.Clone(defaultQueueOptions),
 		}
-
+		for _, f := range opts {
+			if err := f(config); err != nil {
+				return fmt.Errorf("queuebinding setup function <%s> failed, %v", getQueueBindingConfigSetupFuncName(f), err)
+			}
+		}
 		return c.messageHandlerBindQueueToExchange(config)
 	}
 }
@@ -139,6 +146,7 @@ func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T],
 			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
 			exchangeName: exchangeName,
 			kind:         kindTopic,
+			queueHeaders: maps.Clone(defaultQueueOptions),
 		}
 		for _, f := range opts {
 			if err := f(config); err != nil {
@@ -165,13 +173,15 @@ func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHa
 
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
+		headers := maps.Clone(defaultQueueOptions)
+		headers[headerExpires] = 1
 		config := &QueueBindingConfig{
 			routingKey:   routingKey,
 			handler:      newWrappedHandler(handler),
 			queueName:    queueName,
 			exchangeName: exchangeName,
 			kind:         kindTopic,
-			transient:    true,
+			queueHeaders: headers,
 		}
 		return c.messageHandlerBindQueueToExchange(config)
 	}
