@@ -192,7 +192,7 @@ func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
 }
 
 func queueDeclare(channel AmqpChannel, name string, transient bool) error {
-	_, err := channel.QueueDeclare(name, !transient, transient, false, false, queueDeclareExpiration)
+	_, err := channel.QueueDeclare(name, !transient, transient, transient, false, queueDeclareExpiration)
 	return err
 }
 
