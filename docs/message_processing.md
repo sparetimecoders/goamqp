@@ -1,47 +1,36 @@
 ## Message processing and error handling
 
-The `HandlerFunc` is called by goamqp when a message arrive in a queue.
+A registered `EventHandler` is called by goamqp when an event arrives on a queue.
 
 ```go
-type HandlerFunc func(msg any, headers Headers) (response any, err error)
+EventHandler[T any] func (ctx context.Context, event ConsumableEvent[T]) error
 ```
 
-For most purposes an application is only interested in the `msg` parameter, which will be our consumed message. Most
-implementations will look like this:
+For most purposes a handler is just interested in the `event.Payload`.
+You register a handler using one of the `..Consumer` functions, for example:
 
 ```go
-func handler(msg any, headers Headers) (response any, err error) {
-    switch msg.(type) {
-	case *Message:
-	default:
-		fmt.Println("Unknown message type")
-	}
-	return nil, nil
+goamqp.EventStreamConsumer("Order.Created", func(ctx context.Context, event goamqp.ConsumableEvent[Message]) error {
+  fmt.Printf("handled %s", event.Payload.Text)
+  return nil
+})
 ```
 
-The `msg` will be a pointer to the type specified when calling `EventStreamConsumer`, for example:
-```go
-EventStreamConsumer("Order.Created", handler, Message{})
-```
-
-For normal event processing the returned `response` is ignored.
-The same `HandlerFunc` is used for request-response handlers however, for example:
+For request-response, use the `RequestResponseEventHandler` and register it with the `RequestResponseHandler`:
 
 ```go
-RequestResponseHandler(routingKey, handleRequest, Request{})
-
-func handleRequest(msg any, headers Headers) (response any, err error) {
-    return Response{}}, nil
+RequestResponseHandler[T any, R any](routingKey string, handler RequestResponseEventHandler[T, R])
 ```
 
-And in this case the returned `response` (`Response{}` in the code above) will be returned to the calling service.
-
-Returning `nil` as error will Acknowledge the message and it will be removed from the queue.
+```go
+goamqp.RequestResponseHandler("req.resp", func (ctx context.Context, event goamqp.ConsumableEvent[Request]) (Response, error) {
+  return Response{Output: event.Payload.Input}, nil
+})
+```
 
 ### Errors
 
-If anything but `nil` is returned from `HandlerFunc` the message will be rejected and requeued (which means that it will
-be processed again).
+If anything but `nil` is returned from `EventHandler` the event is considered Not Acknowledge and re-queued (which means
+that it will be processed again).
 
-If goamqp fails to unmarshal the JSON content in the message, the message will be rejected and **not** requeued again.
-
+If unmarshal the JSON payload in the event, the event will be rejected but **not** re-queued again.

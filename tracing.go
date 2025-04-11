@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,24 +23,32 @@
 package goamqp
 
 import (
-	"os"
-	"reflect"
-	"testing"
+	"context"
 
-	"github.com/stretchr/testify/require"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-func TestStdoutLogger(t *testing.T) {
-	file, err := os.CreateTemp("", "")
-	require.NoError(t, err)
-	defer func() { _ = os.Remove(file.Name()) }()
-	logger := StdOutMessageLogger()
-	stdout := os.Stdout
-	os.Stdout = file
-	logger([]byte(`{"key":"value"}`), reflect.TypeOf(Connection{}), "key", false)
-	os.Stdout = stdout
-	require.NoError(t, file.Close())
-	all, err := os.ReadFile(file.Name())
-	require.NoError(t, err)
-	require.Equal(t, "Received [goamqp.Connection] from routingkey: 'key' with content:\n{\n\t\"key\": \"value\"\n}\n", string(all))
+// inject the span context to amqp table
+func injectToHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	for k, v := range carrier {
+		headers[k] = v
+	}
+	return headers
+}
+
+// extract the amqp table to a span context
+func extractToContext(headers amqp.Table) context.Context {
+	carrier := propagation.MapCarrier{}
+	for k, v := range headers {
+		value, ok := v.(string)
+		if ok {
+			carrier[k] = value
+		}
+	}
+
+	return otel.GetTextMapPropagator().Extract(context.Background(), carrier)
 }

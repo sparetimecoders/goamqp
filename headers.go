@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,8 @@
 package goamqp
 
 import (
+	"errors"
 	"fmt"
-
-	"github.com/pkg/errors"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // Header represent meta-data  for the message
@@ -35,6 +33,8 @@ type Header struct {
 	Key   string
 	Value any
 }
+
+var ErrEmptyHeaderKey = errors.New("empty key not allowed")
 
 // Headers represent all meta-data for the message
 type Headers map[string]any
@@ -49,7 +49,7 @@ func (h Headers) Get(key string) any {
 
 func (h Header) validateKey() error {
 	if len(h.Key) == 0 || h.Key == "" {
-		return errors.New("empty key not allowed")
+		return ErrEmptyHeaderKey
 	}
 	for _, rh := range reservedHeaderKeys {
 		if rh == h.Key {
@@ -67,14 +67,6 @@ func (h Headers) validate() error {
 		}
 	}
 	return nil
-}
-
-func headers(headers amqp.Table, routingKey string) Headers {
-	if headers == nil {
-		headers = make(amqp.Table)
-	}
-	headers["routing-key"] = routingKey
-	return Headers(headers)
 }
 
 var reservedHeaderKeys = []string{headerService}
