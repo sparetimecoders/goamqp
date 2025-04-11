@@ -63,7 +63,7 @@ func WithTypeMapping(routingKey string, msgType any) Setup {
 // http://www.rabbitmq.com/blog/2012/04/25/rabbitmq-performance-measurements-part-2/
 func WithPrefetchLimit(limit int) Setup {
 	return func(conn *Connection) error {
-		return conn.channel.Qos(limit, 0, true)
+		return conn.channel.Qos(limit, 0, false)
 	}
 }
 
