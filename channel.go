@@ -24,12 +24,14 @@ package goamqp
 
 import (
 	"context"
+	"io"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // AmqpChannel wraps the amqp.Channel to allow for mocking
 type AmqpChannel interface {
+	io.Closer
 	QueueBind(queue, key, exchange string, noWait bool, args amqp.Table) error
 	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
