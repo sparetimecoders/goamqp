@@ -435,7 +435,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		} else {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
-					XExpires:   1,
+					XExpires:   1000,
 					XQueueType: amqp.QueueTypeQuorum,
 				},
 				AutoDelete:           false,
