@@ -171,7 +171,7 @@ func (c *Connection) connectToAmqpURL() error {
 	return nil
 }
 
-func (c *Connection) messageHandlerBindQueueToExchange(cfg *ConsumerConfig) error {
+func (c *Connection) messageHandlerBindQueueToExchange(cfg *consumerConfig) error {
 	if err := c.queueConsumers.add(cfg.queueName, cfg.routingKey, cfg.handler); err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func exchangeDeclare(channel AmqpChannel, name string, kind string) error {
 	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
 }
 
-func queueDeclare(channel AmqpChannel, cfg *ConsumerConfig) error {
+func queueDeclare(channel AmqpChannel, cfg *consumerConfig) error {
 	_, err := channel.QueueDeclare(cfg.queueName, true, false, false, false, cfg.queueHeaders)
 	return err
 }

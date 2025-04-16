@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -94,16 +93,21 @@ func EventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts
 
 // ServiceResponseConsumer is a specialization of EventStreamConsumer
 // It sets up ap a durable, persistent consumer (exchange->queue) for responses from targetService
-func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T]) Setup {
+func ServiceResponseConsumer[T any](targetService, routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	return func(c *Connection) error {
-		config := &ConsumerConfig{
-			routingKey:          routingKey,
-			handler:             newWrappedHandler(handler),
-			queueName:           serviceResponseQueueName(targetService, c.serviceName),
-			exchangeName:        serviceResponseExchangeName(targetService),
-			kind:                amqp.ExchangeHeaders,
-			queueBindingHeaders: amqp.Table{headerService: c.serviceName},
-			queueHeaders:        maps.Clone(defaultQueueOptions),
+		opts = append(opts, func(config *consumerConfig) error {
+			config.queueBindingHeaders[headerService] = c.serviceName
+			return nil
+		})
+
+		config, err := newConsumerConfig(routingKey,
+			serviceResponseExchangeName(targetService),
+			serviceResponseQueueName(targetService, c.serviceName),
+			amqp.ExchangeHeaders,
+			newWrappedHandler(handler),
+			opts...)
+		if err != nil {
+			return err
 		}
 
 		return c.messageHandlerBindQueueToExchange(config)
@@ -119,13 +123,14 @@ func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], o
 			return fmt.Errorf("failed to create exchange %s, %w", resExchangeName, err)
 		}
 
-		config := &ConsumerConfig{
-			routingKey:   routingKey,
-			handler:      newWrappedHandler(handler),
-			queueName:    serviceRequestQueueName(c.serviceName),
-			exchangeName: serviceRequestExchangeName(c.serviceName),
-			kind:         amqp.ExchangeDirect,
-			queueHeaders: maps.Clone(defaultQueueOptions),
+		config, err := newConsumerConfig(routingKey,
+			serviceRequestExchangeName(c.serviceName),
+			serviceRequestQueueName(c.serviceName),
+			amqp.ExchangeDirect,
+			newWrappedHandler(handler),
+			opts...)
+		if err != nil {
+			return err
 		}
 		for _, f := range opts {
 			if err := f(config); err != nil {
@@ -140,18 +145,14 @@ func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], o
 func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	exchangeName := topicExchangeName(exchange)
 	return func(c *Connection) error {
-		config := &ConsumerConfig{
-			routingKey:   routingKey,
-			handler:      newWrappedHandler(handler),
-			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
-			exchangeName: exchangeName,
-			kind:         amqp.ExchangeTopic,
-			queueHeaders: maps.Clone(defaultQueueOptions),
-		}
-		for _, f := range opts {
-			if err := f(config); err != nil {
-				return fmt.Errorf("queuebinding setup function <%s> failed, %v", getQueueBindingConfigSetupFuncName(f), err)
-			}
+		config, err := newConsumerConfig(routingKey,
+			exchangeName,
+			serviceEventQueueName(exchangeName, c.serviceName),
+			amqp.ExchangeTopic,
+			newWrappedHandler(handler),
+			opts...)
+		if err != nil {
+			return err
 		}
 
 		return c.messageHandlerBindQueueToExchange(config)
@@ -161,28 +162,31 @@ func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T],
 // TransientEventStreamConsumer sets up an event stream consumer that will clean up resources when the
 // connection is closed.
 // For a durable queue, use the EventStreamConsumer function instead.
-func TransientEventStreamConsumer[T any](routingKey string, handler EventHandler[T]) Setup {
-	return TransientStreamConsumer(defaultEventExchangeName, routingKey, handler)
+func TransientEventStreamConsumer[T any](routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
+	return TransientStreamConsumer(defaultEventExchangeName, routingKey, handler, opts...)
 }
 
 // TransientStreamConsumer sets up an event stream consumer that will clean up resources when the
 // connection is closed.
 // For a durable queue, use the StreamConsumer function instead.
-func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHandler[T]) Setup {
+func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	exchangeName := topicExchangeName(exchange)
-
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
-		headers := maps.Clone(defaultQueueOptions)
-		headers[amqp.QueueTTLArg] = 1000
-		config := &ConsumerConfig{
-			routingKey:   routingKey,
-			handler:      newWrappedHandler(handler),
-			queueName:    queueName,
-			exchangeName: exchangeName,
-			kind:         amqp.ExchangeTopic,
-			queueHeaders: headers,
+		opts = append(opts, func(config *consumerConfig) error {
+			config.queueHeaders[amqp.QueueTTLArg] = 1000
+			return nil
+		})
+		config, err := newConsumerConfig(routingKey,
+			exchangeName,
+			queueName,
+			amqp.ExchangeTopic,
+			newWrappedHandler(handler),
+			opts...)
+		if err != nil {
+			return err
 		}
+
 		return c.messageHandlerBindQueueToExchange(config)
 	}
 }
