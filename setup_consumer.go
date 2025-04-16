@@ -174,7 +174,7 @@ func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHa
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
 		headers := maps.Clone(defaultQueueOptions)
-		headers[amqp.QueueTTLArg] = 1
+		headers[amqp.QueueTTLArg] = 1000
 		config := &ConsumerConfig{
 			routingKey:   routingKey,
 			handler:      newWrappedHandler(handler),

@@ -109,7 +109,7 @@ func Test_Consumer_Setups(t *testing.T) {
 			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: nil}},
 			expectedQueues: []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: true, autoDelete: false, exclusive: false, noWait: false, args: func() map[string]any {
 				clone := maps.Clone(defaultQueueOptions)
-				clone[amqp.QueueTTLArg] = 1
+				clone[amqp.QueueTTLArg] = 1000
 				return clone
 			}()}},
 			expectedConsumer: []Consumer{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
@@ -127,7 +127,7 @@ func Test_Consumer_Setups(t *testing.T) {
 			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "root.key", exchange: "events.topic.exchange", noWait: false, args: nil}},
 			expectedQueues: []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: true, autoDelete: false, exclusive: false, noWait: false, args: func() map[string]any {
 				clone := maps.Clone(defaultQueueOptions)
-				clone[amqp.QueueTTLArg] = 1
+				clone[amqp.QueueTTLArg] = 1000
 				return clone
 			}()}},
 			expectedError: "routingkey root.# overlaps root.key for queue events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f, consider using AddQueueNameSuffix",
