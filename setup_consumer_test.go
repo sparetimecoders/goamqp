@@ -57,7 +57,7 @@ func Test_Consumer_Setups(t *testing.T) {
 			})},
 			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc", noWait: false, autoDelete: false, durable: true, exclusive: false, args: defaultQueueOptions}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc", noWait: false, exchange: "events.topic.exchange", key: "key", args: nil}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc", noWait: false, exchange: "events.topic.exchange", key: "key", args: amqp.Table{}}},
 			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 		},
 		{
@@ -67,7 +67,7 @@ func Test_Consumer_Setups(t *testing.T) {
 			}, AddQueueNameSuffix("suffix"))},
 			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", noWait: false, internal: false, autoDelete: false, durable: true, kind: "topic", args: nil}},
 			expectedQueues:    []QueueDeclaration{{name: "events.topic.exchange.queue.svc-suffix", noWait: false, autoDelete: false, durable: true, exclusive: false, args: defaultQueueOptions}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-suffix", noWait: false, exchange: "events.topic.exchange", key: "key", args: nil}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-suffix", noWait: false, exchange: "events.topic.exchange", key: "key", args: amqp.Table{}}},
 			expectedConsumer:  []Consumer{{queue: "events.topic.exchange.queue.svc-suffix", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 		},
 		{
@@ -87,7 +87,7 @@ func Test_Consumer_Setups(t *testing.T) {
 				{name: "svc.direct.exchange.request", noWait: false, internal: false, autoDelete: false, durable: true, kind: "direct", args: nil},
 			},
 			expectedQueues:   []QueueDeclaration{{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, exclusive: false, args: defaultQueueOptions}},
-			expectedBindings: []BindingDeclaration{{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: nil}},
+			expectedBindings: []BindingDeclaration{{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp.Table{}}},
 			expectedConsumer: []Consumer{{queue: "svc.direct.exchange.request.queue", consumer: "", noWait: false, noLocal: false, exclusive: false, autoAck: false, args: nil}},
 		},
 		{
@@ -106,7 +106,7 @@ func Test_Consumer_Setups(t *testing.T) {
 				return errors.New("failed")
 			})},
 			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", kind: "topic", durable: true, autoDelete: false, internal: false, noWait: false, args: nil}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: nil}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "key", exchange: "events.topic.exchange", noWait: false, args: amqp.Table{}}},
 			expectedQueues: []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: true, autoDelete: false, exclusive: false, noWait: false, args: func() map[string]any {
 				clone := maps.Clone(defaultQueueOptions)
 				clone[amqp.QueueTTLArg] = 1000
@@ -124,7 +124,7 @@ func Test_Consumer_Setups(t *testing.T) {
 				}),
 			},
 			expectedExchanges: []ExchangeDeclaration{{name: "events.topic.exchange", kind: "topic", durable: true, autoDelete: false, internal: false, noWait: false, args: nil}},
-			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "root.key", exchange: "events.topic.exchange", noWait: false, args: nil}},
+			expectedBindings:  []BindingDeclaration{{queue: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", key: "root.key", exchange: "events.topic.exchange", noWait: false, args: amqp.Table{}}},
 			expectedQueues: []QueueDeclaration{{name: "events.topic.exchange.queue.svc-00010203-0405-4607-8809-0a0b0c0d0e0f", durable: true, autoDelete: false, exclusive: false, noWait: false, args: func() map[string]any {
 				clone := maps.Clone(defaultQueueOptions)
 				clone[amqp.QueueTTLArg] = 1000

@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +55,7 @@ func Test_RequestResponseHandler(t *testing.T) {
 	require.Equal(t, QueueDeclaration{name: "svc.direct.exchange.request.queue", noWait: false, autoDelete: false, durable: true, exclusive: false, args: defaultQueueOptions}, channel.QueueDeclarations[0])
 
 	require.Equal(t, 1, len(channel.BindingDeclarations))
-	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: nil}, channel.BindingDeclarations[0])
+	require.Equal(t, BindingDeclaration{queue: "svc.direct.exchange.request.queue", noWait: false, exchange: "svc.direct.exchange.request", key: "key", args: amqp091.Table{}}, channel.BindingDeclarations[0])
 
 	require.Len(t, (*conn).queueConsumers.consumers, 1)
 	handler, _ := conn.queueConsumers.get("svc.direct.exchange.request.queue", "key")

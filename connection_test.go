@@ -101,7 +101,7 @@ func Test_messageHandlerBindQueueToExchange(t *testing.T) {
 				ExchangeDeclarationError: &tt.exchangeDeclarationError,
 			}
 			conn := mockConnection(channel)
-			cfg := &ConsumerConfig{
+			cfg := &consumerConfig{
 				routingKey:          "routingkey",
 				handler:             nil,
 				queueName:           "queue",
@@ -247,7 +247,7 @@ func Test_AmqpConfig(t *testing.T) {
 
 func Test_QueueDeclare(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	err := queueDeclare(channel, &ConsumerConfig{
+	err := queueDeclare(channel, &consumerConfig{
 		queueName:    "test",
 		exchangeName: "test",
 		queueHeaders: defaultQueueOptions})
@@ -258,7 +258,7 @@ func Test_QueueDeclare(t *testing.T) {
 
 func Test_TransientQueueDeclare(t *testing.T) {
 	channel := NewMockAmqpChannel()
-	err := queueDeclare(channel, &ConsumerConfig{
+	err := queueDeclare(channel, &consumerConfig{
 		queueName:    "test",
 		exchangeName: "test",
 		queueHeaders: defaultQueueOptions})

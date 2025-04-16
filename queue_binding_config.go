@@ -24,18 +24,38 @@ package goamqp
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"runtime"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// ConsumerOptions is a setup function that takes a ConsumerConfig and provide custom changes to the
+// ConsumerOptions is a setup function that takes a consumerConfig and provide custom changes to the
 // configuration
-type ConsumerOptions func(config *ConsumerConfig) error
+type ConsumerOptions func(config *consumerConfig) error
 
-// ConsumerConfig is a wrapper around the actual amqp queue configuration
-type ConsumerConfig struct {
+// consumerConfig is a wrapper around the actual amqp queue configuration
+func newConsumerConfig(routingKey string, exchangeName string, queueName string, kind string, handler wrappedHandler, opts ...ConsumerOptions) (*consumerConfig, error) {
+	cfg := &consumerConfig{
+		routingKey:          routingKey,
+		handler:             handler,
+		queueName:           queueName,
+		exchangeName:        exchangeName,
+		kind:                kind,
+		queueHeaders:        maps.Clone(defaultQueueOptions),
+		queueBindingHeaders: make(amqp.Table),
+	}
+
+	for _, f := range opts {
+		if err := f(cfg); err != nil {
+			return nil, fmt.Errorf("queuebinding setup function <%s> failed, %v", getQueueBindingConfigSetupFuncName(f), err)
+		}
+	}
+	return cfg, nil
+}
+
+type consumerConfig struct {
 	routingKey          string
 	handler             wrappedHandler
 	queueName           string
@@ -48,7 +68,7 @@ type ConsumerConfig struct {
 // AddQueueNameSuffix appends the provided suffix to the queue name
 // Useful when multiple queueConsumers are needed for a routing key in the same service
 func AddQueueNameSuffix(suffix string) ConsumerOptions {
-	return func(config *ConsumerConfig) error {
+	return func(config *consumerConfig) error {
 		if suffix == "" {
 			return ErrEmptySuffix
 		}
@@ -60,7 +80,7 @@ func AddQueueNameSuffix(suffix string) ConsumerOptions {
 // DisableSingleActiveConsumer will define the queue as non exclusive and set the x-single-active-consumer header to false
 // https://www.rabbitmq.com/docs/consumers#exclusivity
 func DisableSingleActiveConsumer() ConsumerOptions {
-	return func(config *ConsumerConfig) error {
+	return func(config *consumerConfig) error {
 		config.queueHeaders[amqp.SingleActiveConsumerArg] = false
 		return nil
 	}
