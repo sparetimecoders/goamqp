@@ -137,6 +137,10 @@ type MockAmqpChannel struct {
 	closeNotifier            chan *amqp.Error
 }
 
+func (m *MockAmqpChannel) Close() error {
+	return nil
+}
+
 func (m *MockAmqpChannel) Qos(prefetchCount, prefetchSize int, global bool) error {
 	if m.qosFn == nil {
 		return nil
