@@ -1,6 +1,6 @@
 module github.com/sparetimecoders/goamqp
 
-go 1.22.12
+go 1.23
 
 require (
 	github.com/google/uuid v1.6.0
