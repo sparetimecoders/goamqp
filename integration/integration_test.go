@@ -34,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -102,7 +103,7 @@ func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 	require.Equal(suite.T(), []Queue{{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "quorum",
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -188,7 +189,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "quorum",
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -214,7 +215,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "quorum",
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -294,7 +295,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "quorum",
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -323,7 +324,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "quorum",
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
@@ -413,7 +414,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
 					XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-					XQueueType: "quorum",
+					XQueueType: amqp.QueueTypeQuorum,
 				},
 				AutoDelete:           false,
 				Durable:              true,
@@ -435,7 +436,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
 					XExpires:   1,
-					XQueueType: "quorum",
+					XQueueType: amqp.QueueTypeQuorum,
 				},
 				AutoDelete:           false,
 				Durable:              true,
@@ -542,7 +543,7 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	require.Equal(suite.T(), Queue{
 		Arguments: QueueArguments{
 			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
-			XQueueType: "quorum",
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,

@@ -106,7 +106,7 @@ func Test_messageHandlerBindQueueToExchange(t *testing.T) {
 				handler:             nil,
 				queueName:           "queue",
 				exchangeName:        "exchange",
-				kind:                kindDirect,
+				kind:                amqp.ExchangeDirect,
 				queueBindingHeaders: nil,
 				queueHeaders:        nil,
 			}

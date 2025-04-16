@@ -74,7 +74,7 @@ func Test_Publisher_Setups(t *testing.T) {
 			},
 			messages:          []any{TestMessage{"test", true}},
 			headers:           []Header{{"x-header", "header"}},
-			expectedExchanges: []ExchangeDeclaration{{name: topicExchangeName(defaultEventExchangeName), noWait: false, internal: false, autoDelete: false, durable: true, kind: kindTopic, args: nil}},
+			expectedExchanges: []ExchangeDeclaration{{name: topicExchangeName(defaultEventExchangeName), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeTopic, args: nil}},
 			expectedPublished: []*Publish{{
 				exchange:  topicExchangeName(defaultEventExchangeName),
 				key:       "key",
@@ -93,7 +93,7 @@ func Test_Publisher_Setups(t *testing.T) {
 			opts: func(p *Publisher) []Setup {
 				return []Setup{ServicePublisher("svc", p), WithTypeMapping("key", TestMessage{})}
 			},
-			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: kindDirect, args: nil}},
+			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeDirect, args: nil}},
 			messages:          []any{TestMessage{"test", true}},
 			expectedPublished: []*Publish{{
 				exchange:  serviceRequestExchangeName("svc"),
@@ -113,7 +113,7 @@ func Test_Publisher_Setups(t *testing.T) {
 			opts: func(p *Publisher) []Setup {
 				return []Setup{ServicePublisher("svc", p), WithTypeMapping("key1", TestMessage{}), WithTypeMapping("key2", TestMessage2{})}
 			},
-			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: kindDirect, args: nil}},
+			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeDirect, args: nil}},
 			messages: []any{
 				TestMessage{"test", true},
 				TestMessage2{"test", false},
@@ -161,7 +161,7 @@ func Test_Publisher_Setups(t *testing.T) {
 			opts: func(p *Publisher) []Setup {
 				return []Setup{ServicePublisher("svc", p)}
 			},
-			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: kindDirect, args: nil}},
+			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeDirect, args: nil}},
 			messages: []any{
 				TestMessage{"test", true},
 			},

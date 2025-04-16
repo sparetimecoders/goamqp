@@ -101,7 +101,7 @@ func ServiceResponseConsumer[T any](targetService, routingKey string, handler Ev
 			handler:             newWrappedHandler(handler),
 			queueName:           serviceResponseQueueName(targetService, c.serviceName),
 			exchangeName:        serviceResponseExchangeName(targetService),
-			kind:                kindHeaders,
+			kind:                amqp.ExchangeHeaders,
 			queueBindingHeaders: amqp.Table{headerService: c.serviceName},
 			queueHeaders:        maps.Clone(defaultQueueOptions),
 		}
@@ -115,7 +115,7 @@ func ServiceResponseConsumer[T any](targetService, routingKey string, handler Ev
 func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], opts ...ConsumerOptions) Setup {
 	return func(c *Connection) error {
 		resExchangeName := serviceResponseExchangeName(c.serviceName)
-		if err := exchangeDeclare(c.channel, resExchangeName, kindHeaders); err != nil {
+		if err := exchangeDeclare(c.channel, resExchangeName, amqp.ExchangeHeaders); err != nil {
 			return fmt.Errorf("failed to create exchange %s, %w", resExchangeName, err)
 		}
 
@@ -124,7 +124,7 @@ func ServiceRequestConsumer[T any](routingKey string, handler EventHandler[T], o
 			handler:      newWrappedHandler(handler),
 			queueName:    serviceRequestQueueName(c.serviceName),
 			exchangeName: serviceRequestExchangeName(c.serviceName),
-			kind:         kindDirect,
+			kind:         amqp.ExchangeDirect,
 			queueHeaders: maps.Clone(defaultQueueOptions),
 		}
 		for _, f := range opts {
@@ -145,7 +145,7 @@ func StreamConsumer[T any](exchange, routingKey string, handler EventHandler[T],
 			handler:      newWrappedHandler(handler),
 			queueName:    serviceEventQueueName(exchangeName, c.serviceName),
 			exchangeName: exchangeName,
-			kind:         kindTopic,
+			kind:         amqp.ExchangeTopic,
 			queueHeaders: maps.Clone(defaultQueueOptions),
 		}
 		for _, f := range opts {
@@ -174,13 +174,13 @@ func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHa
 	return func(c *Connection) error {
 		queueName := serviceEventRandomQueueName(exchangeName, c.serviceName)
 		headers := maps.Clone(defaultQueueOptions)
-		headers[headerExpires] = 1
+		headers[amqp.QueueTTLArg] = 1
 		config := &ConsumerConfig{
 			routingKey:   routingKey,
 			handler:      newWrappedHandler(handler),
 			queueName:    queueName,
 			exchangeName: exchangeName,
-			kind:         kindTopic,
+			kind:         amqp.ExchangeTopic,
 			queueHeaders: headers,
 		}
 		return c.messageHandlerBindQueueToExchange(config)

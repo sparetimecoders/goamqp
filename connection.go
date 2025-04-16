@@ -185,7 +185,7 @@ func (c *Connection) messageHandlerBindQueueToExchange(cfg *ConsumerConfig) erro
 	return c.channel.QueueBind(cfg.queueName, cfg.routingKey, cfg.exchangeName, false, cfg.queueBindingHeaders)
 }
 
-func exchangeDeclare(channel AmqpChannel, name string, kind kind) error {
+func exchangeDeclare(channel AmqpChannel, name string, kind string) error {
 	return channel.ExchangeDeclare(name, string(kind), true, false, false, false, nil)
 }
 
@@ -194,19 +194,8 @@ func queueDeclare(channel AmqpChannel, cfg *ConsumerConfig) error {
 	return err
 }
 
-type kind string
-
 const (
-	kindDirect  = "direct"
-	kindHeaders = "headers"
-	kindTopic   = "topic"
-)
-
-const (
-	headerService              = "service"
-	headerExpires              = "x-expires"
-	headerQueueType            = "x-queue-type"
-	headerSingleActiveConsumer = "x-single-active-consumer"
+	headerService = "service"
 )
 
 const contentType = "application/json"
@@ -214,9 +203,9 @@ const contentType = "application/json"
 var (
 	deleteQueueAfter    = 5 * 24 * time.Hour
 	defaultQueueOptions = amqp.Table{
-		headerQueueType:            "quorum",
-		headerSingleActiveConsumer: true,
-		headerExpires:              int(deleteQueueAfter.Seconds() * 1000)}
+		amqp.QueueTypeArg:            amqp.QueueTypeQuorum,
+		amqp.SingleActiveConsumerArg: true,
+		amqp.QueueTTLArg:             int(deleteQueueAfter.Seconds() * 1000)}
 )
 
 func newConnection(serviceName string, uri amqp.URI) *Connection {
