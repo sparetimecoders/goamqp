@@ -40,7 +40,7 @@ type ConsumerConfig struct {
 	handler             wrappedHandler
 	queueName           string
 	exchangeName        string
-	kind                kind
+	kind                string
 	queueHeaders        amqp.Table
 	queueBindingHeaders amqp.Table
 }
@@ -61,7 +61,7 @@ func AddQueueNameSuffix(suffix string) ConsumerOptions {
 // https://www.rabbitmq.com/docs/consumers#exclusivity
 func DisableSingleActiveConsumer() ConsumerOptions {
 	return func(config *ConsumerConfig) error {
-		config.queueHeaders[headerSingleActiveConsumer] = false
+		config.queueHeaders[amqp.SingleActiveConsumerArg] = false
 		return nil
 	}
 }

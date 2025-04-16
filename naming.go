@@ -27,12 +27,13 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 const defaultEventExchangeName = "events"
 
 func topicExchangeName(svcName string) string {
-	return fmt.Sprintf("%s.%s.exchange", svcName, kindTopic)
+	return fmt.Sprintf("%s.%s.exchange", svcName, amqp091.ExchangeTopic)
 }
 
 func serviceEventQueueName(exchangeName, service string) string {
