@@ -29,25 +29,31 @@ import (
 	"runtime"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/sparetimecoders/typemapper"
 )
 
 // Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
 
-// WithTypeMapping adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
-func WithTypeMapping(routingKey string, msgType any) Setup {
+// WithTypeMappings adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
+func WithTypeMappings(mapper *typemapper.Mapper) Setup {
 	return func(conn *Connection) error {
-		typ := reflect.TypeOf(msgType)
-		if t, exists := conn.keyToType[routingKey]; exists && t != typ {
-			return fmt.Errorf("mapping for routing key '%s' already registered to type '%s'", routingKey, t)
+		for _, k := range mapper.Keys() {
+			v, _ := mapper.Type(k)
+			if err := conn.mapper.Add(k, v); err != nil {
+				return err
+			}
 		}
-		if key, exists := conn.typeToKey[typ]; exists && key != routingKey {
-			return fmt.Errorf("mapping for type '%s' already registered to routing key '%s'", typ, key)
-		}
-		conn.keyToType[routingKey] = typ
-		conn.typeToKey[typ] = routingKey
 		return nil
+	}
+}
+
+// WithTypeMapping adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
+func WithTypeMapping(routingKey string, typ any) Setup {
+	return func(conn *Connection) error {
+		return conn.mapper.Add(routingKey, typ)
 	}
 }
 
