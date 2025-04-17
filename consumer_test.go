@@ -62,7 +62,7 @@ func Test_Consume(t *testing.T) {
 		return deliveries, nil
 	}}
 
-	deliveries, err := consumer.consume(channel, nil, nil, nil)
+	deliveries, err := consumer.consume(channel, nil, nil)
 	require.NoError(t, err)
 	delivery := <-deliveries
 	require.Equal(t, "MESSAGE_ID", delivery.MessageId)
@@ -77,7 +77,7 @@ func Test_Consume_Failing(t *testing.T) {
 		return nil, fmt.Errorf("failed")
 	}}
 
-	_, err := consumer.consume(channel, nil, nil, nil)
+	_, err := consumer.consume(channel, nil, nil)
 	require.EqualError(t, err, "failed")
 }
 

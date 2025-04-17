@@ -28,13 +28,14 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sparetimecoders/typemapper"
 )
 
 func Test_Consumer_Setups(t *testing.T) {
@@ -168,28 +169,9 @@ func Test_Consumer_Setups(t *testing.T) {
 	}
 }
 
-func Test_MappingsInContext(t *testing.T) {
-	mappings := routingKeyToType{
-		"string": reflect.TypeOf(""),
-		"double": reflect.TypeOf(1.0),
-	}
-	rootCtx := context.TODO()
-	ctx := injectRoutingKeyToTypeContext(rootCtx, mappings)
-	instance, ok := routingKeyToTypeFromContext(ctx, "string")
-	require.True(t, ok)
-	require.IsType(t, reflect.TypeOf(instance), reflect.TypeOf(""))
-
-	_, ok = routingKeyToTypeFromContext(ctx, "int")
-	require.False(t, ok)
-
-	// This should always fail
-	_, ok = routingKeyToTypeFromContext(rootCtx, "string")
-	require.False(t, ok)
-}
-
 func Test_TypeMappingHandler(t *testing.T) {
 	type fields struct {
-		keyToType map[string]reflect.Type
+		mapper *typemapper.Mapper
 	}
 	type args struct {
 		handler func(t *testing.T) Handler
@@ -203,13 +185,16 @@ func Test_TypeMappingHandler(t *testing.T) {
 		wantErr assert.ErrorAssertionFunc
 	}{
 		{
-			name:   "no mapped type, ignored",
-			fields: fields{},
+			name: "no mapped type, ignored",
+			fields: fields{
+				mapper: typemapper.New(),
+			},
 			args: args{
 				msg: []byte(`{"a":true}`),
 				key: "unknown",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
+					return func(ctx context.Context, event any) error {
+						t.Fail()
 						return nil
 					}
 				},
@@ -221,15 +206,16 @@ func Test_TypeMappingHandler(t *testing.T) {
 		{
 			name: "parse error",
 			fields: fields{
-				keyToType: map[string]reflect.Type{
-					"known": reflect.TypeOf(TestMessage{}),
-				},
+				mapper: func() *typemapper.Mapper {
+					m, _ := typemapper.NewFromMap(map[string]any{"known": TestMessage{}})
+					return m
+				}(),
 			},
 			args: args{
 				msg: []byte(`{"a:}`),
 				key: "known",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
+					return func(ctx context.Context, event any) error {
 						return nil
 					}
 				},
@@ -241,16 +227,17 @@ func Test_TypeMappingHandler(t *testing.T) {
 		{
 			name: "handler error",
 			fields: fields{
-				keyToType: map[string]reflect.Type{
-					"known": reflect.TypeOf(TestMessage{}),
-				},
+				mapper: func() *typemapper.Mapper {
+					m, _ := typemapper.NewFromMap(map[string]any{"known": TestMessage{}})
+					return m
+				}(),
 			},
 			args: args{
 				msg: []byte(`{"a":true}`),
 				key: "known",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
-						assert.IsType(t, &TestMessage{}, event.Payload)
+					return func(ctx context.Context, event any) error {
+						assert.IsType(t, &TestMessage{}, event)
 						return fmt.Errorf("handler-error")
 					}
 				},
@@ -262,16 +249,17 @@ func Test_TypeMappingHandler(t *testing.T) {
 		{
 			name: "success",
 			fields: fields{
-				keyToType: map[string]reflect.Type{
-					"known": reflect.TypeOf(TestMessage{}),
-				},
+				mapper: func() *typemapper.Mapper {
+					m, _ := typemapper.NewFromMap(map[string]any{"known": TestMessage{}})
+					return m
+				}(),
 			},
 			args: args{
 				msg: []byte(`{"a":true}`),
 				key: "known",
 				handler: func(t *testing.T) Handler {
-					return func(ctx context.Context, event ConsumableEvent[any]) error {
-						assert.IsType(t, &TestMessage{}, event.Payload)
+					return func(ctx context.Context, event any) error {
+						assert.IsType(t, &TestMessage{}, event)
 						return nil
 					}
 				},
@@ -281,9 +269,9 @@ func Test_TypeMappingHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := injectRoutingKeyToTypeContext(context.TODO(), tt.fields.keyToType)
+			ctx := context.TODO()
 
-			handler := TypeMappingHandler(tt.args.handler(t))
+			handler := TypeMappingHandler(tt.args.handler(t), tt.fields.mapper)
 			err := handler(ctx, ConsumableEvent[json.RawMessage]{
 				Payload:      tt.args.msg,
 				DeliveryInfo: DeliveryInfo{RoutingKey: tt.args.key},

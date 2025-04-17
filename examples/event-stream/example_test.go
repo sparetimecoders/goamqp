@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/sparetimecoders/goamqp"
+	"github.com/sparetimecoders/typemapper"
 )
 
 var amqpURL = "amqp://user:password@localhost:5672"
@@ -40,10 +41,15 @@ func Example_event_stream() {
 	}
 	orderServiceConnection := goamqp.Must(goamqp.NewFromURL("order-service", amqpURL))
 	orderPublisher := goamqp.NewPublisher()
-	err := orderServiceConnection.Start(ctx,
+	mapper, err := typemapper.NewFromMap(map[string]any{
+		"Order.Created": OrderCreated{},
+		"Order.Updated": OrderUpdated{},
+	})
+	checkError(err)
+
+	err = orderServiceConnection.Start(ctx,
 		goamqp.EventStreamPublisher(orderPublisher),
-		goamqp.WithTypeMapping("Order.Created", OrderCreated{}),
-		goamqp.WithTypeMapping("Order.Updated", OrderUpdated{}),
+		goamqp.WithTypeMappings(mapper),
 	)
 	checkError(err)
 
@@ -110,19 +116,20 @@ func (s *ShippingService) Stop() error {
 
 func (s *ShippingService) Start(ctx context.Context) error {
 	s.connection = goamqp.Must(goamqp.NewFromURL("shipping-service", amqpURL))
-
+	mapper, _ := typemapper.NewFromMap(map[string]any{
+		"Order.Created": OrderCreated{},
+		"Order.Updated": OrderUpdated{},
+	})
 	return s.connection.Start(ctx,
-		goamqp.WithTypeMapping("Order.Created", OrderCreated{}),
-		goamqp.WithTypeMapping("Order.Updated", OrderUpdated{}),
-		goamqp.EventStreamConsumer("#", goamqp.TypeMappingHandler(func(ctx context.Context, event goamqp.ConsumableEvent[any]) error {
-			switch event.Payload.(type) {
+		goamqp.EventStreamConsumer("#", goamqp.TypeMappingHandler(func(ctx context.Context, event any) error {
+			switch event.(type) {
 			case *OrderCreated:
 				s.output = append(s.output, "Order created")
 			case *OrderUpdated:
 				s.output = append(s.output, "Order deleted")
 			}
 			return nil
-		}),
+		}, mapper),
 		),
 	)
 }

@@ -86,7 +86,7 @@ func Test_WithTypeMapping_KeyAlreadyExist(t *testing.T) {
 	err := WithTypeMapping("key", TestMessage{})(conn)
 	require.NoError(t, err)
 	err = WithTypeMapping("key", TestMessage2{})(conn)
-	require.EqualError(t, err, "mapping for routing key 'key' already registered to type 'goamqp.TestMessage'")
+	require.EqualError(t, err, "mapping for key 'key' already registered to type 'goamqp.TestMessage'")
 
 	err = WithTypeMapping("key", TestMessage{})(conn)
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func Test_WithTypeMapping_TypeAlreadyExist(t *testing.T) {
 	err := WithTypeMapping("key", TestMessage{})(conn)
 	require.NoError(t, err)
 	err = WithTypeMapping("other", TestMessage{})(conn)
-	require.EqualError(t, err, "mapping for type 'goamqp.TestMessage' already registered to routing key 'key'")
+	require.EqualError(t, err, "mapping for type 'goamqp.TestMessage' already registered to key 'key'")
 
 	err = WithTypeMapping("key", TestMessage{})(conn)
 	require.NoError(t, err)

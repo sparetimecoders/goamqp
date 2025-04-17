@@ -32,16 +32,14 @@ import (
 )
 
 type queueConsumer struct {
-	queue            string
-	handlers         routingKeyHandler
-	routingKeyToType routingKeyToType
-	notificationCh   chan<- Notification
-	errorCh          chan<- ErrorNotification
-	spanNameFn       func(info DeliveryInfo) string
+	queue          string
+	handlers       routingKeyHandler
+	notificationCh chan<- Notification
+	errorCh        chan<- ErrorNotification
+	spanNameFn     func(info DeliveryInfo) string
 }
 
-func (c *queueConsumer) consume(channel AmqpChannel, routingKeyToType routingKeyToType, notificationCh chan<- Notification, errorCh chan<- ErrorNotification) (<-chan amqp.Delivery, error) {
-	c.routingKeyToType = routingKeyToType
+func (c *queueConsumer) consume(channel AmqpChannel, notificationCh chan<- Notification, errorCh chan<- ErrorNotification) (<-chan amqp.Delivery, error) {
 	c.notificationCh = notificationCh
 	c.errorCh = errorCh
 	deliveries, err := channel.Consume(c.queue, "", false, false, false, false, nil)
@@ -71,11 +69,10 @@ func (c *queueConsumer) handleDelivery(handler wrappedHandler, delivery amqp.Del
 	headerCtx := extractToContext(delivery.Headers)
 	tracingCtx, span := otel.Tracer("amqp").Start(headerCtx, c.spanNameFn(deliveryInfo))
 	defer span.End()
-	handlerCtx := injectRoutingKeyToTypeContext(tracingCtx, c.routingKeyToType)
 	startTime := time.Now()
 
 	uevt := unmarshalEvent{DeliveryInfo: deliveryInfo, Payload: delivery.Body}
-	if err := handler(handlerCtx, uevt); err != nil {
+	if err := handler(tracingCtx, uevt); err != nil {
 		elapsed := time.Since(startTime).Milliseconds()
 		notifyEventHandlerFailed(c.errorCh, deliveryInfo, elapsed, err)
 		if errors.Is(err, ErrParseJSON) {

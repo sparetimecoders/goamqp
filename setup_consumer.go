@@ -29,13 +29,14 @@ import (
 	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/sparetimecoders/typemapper"
 )
 
 type (
-	// Handler is the type definition for a function that is used to handle events that has been mapped with
-	// RoutingKey <-> Type mappings from WithTypeMapping.
+	// Handler is the type definition for a function that is used to handle "raw" events, without the ConsumableEvent parts.
 	// If processing fails, an error should be returned and the message will be re-queued
-	Handler func(ctx context.Context, event ConsumableEvent[any]) error
+	Handler func(ctx context.Context, event any) error
 	// EventHandler is the type definition for a function that is used to handle events of a specific type.
 	// If processing fails, an error should be returned and the message will be re-queued
 	EventHandler[T any] func(ctx context.Context, event ConsumableEvent[T]) error
@@ -65,23 +66,20 @@ func LegacyHandler[T any](handler HandlerFunc, typ T) EventHandler[T] {
 
 // TypeMappingHandler wraps a Handler func into an EventHandler in order to use it with the different
 // Consumer Setup func.
-// It will use the mappings from WithTypeMapping to determine routing key -> actual event type and pass it to the
-// handler func.
-func TypeMappingHandler(handler Handler) EventHandler[json.RawMessage] {
+func TypeMappingHandler(handler Handler, routingKeyToType *typemapper.Mapper) EventHandler[json.RawMessage] {
 	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
-		message, exists := routingKeyToTypeFromContext(ctx, event.DeliveryInfo.RoutingKey)
+		if routingKeyToType == nil {
+			return fmt.Errorf("mapper is nil")
+		}
+		message, exists := routingKeyToType.Type(event.DeliveryInfo.RoutingKey)
 		if !exists {
 			return ErrNoMessageTypeForRouteKey
 		}
-		if err := json.Unmarshal(event.Payload, &message); err != nil {
+		payload := reflect.New(message).Interface()
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			return fmt.Errorf("%v: %w", err, ErrParseJSON)
 		}
-		msg := ConsumableEvent[any]{
-			Metadata:     event.Metadata,
-			DeliveryInfo: event.DeliveryInfo,
-			Payload:      message,
-		}
-		return handler(ctx, msg)
+		return handler(ctx, payload)
 	}
 }
 
@@ -189,26 +187,4 @@ func TransientStreamConsumer[T any](exchange, routingKey string, handler EventHa
 
 		return c.messageHandlerBindQueueToExchange(config)
 	}
-}
-
-// Handles WithTypeMapping mappings in context.Context
-type routingKeyToTypeCtx string
-
-const routingKeyToTypeCtxProperty routingKeyToTypeCtx = "routingKeyToType"
-
-func injectRoutingKeyToTypeContext(ctx context.Context, keyToType routingKeyToType) context.Context {
-	return context.WithValue(ctx, routingKeyToTypeCtxProperty, keyToType)
-}
-
-func routingKeyToTypeFromContext(ctx context.Context, routingKey string) (any, bool) {
-	keyToType, ok := ctx.Value(routingKeyToTypeCtxProperty).(routingKeyToType)
-	if !ok {
-		return nil, false
-	}
-
-	typ, exists := keyToType[routingKey]
-	if !exists {
-		return nil, false
-	}
-	return reflect.New(typ).Interface(), true
 }

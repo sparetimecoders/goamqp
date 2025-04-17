@@ -27,11 +27,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
 	"runtime/debug"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/sparetimecoders/typemapper"
 )
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
@@ -42,8 +43,7 @@ type Connection struct {
 	connection     amqpConnection
 	channel        AmqpChannel
 	queueConsumers *queueConsumers
-	typeToKey      typeToRoutingKey
-	keyToType      routingKeyToType
+	mapper         *typemapper.Mapper
 	notificationCh chan<- Notification
 	errorCh        chan<- ErrorNotification
 	spanNameFn     func(DeliveryInfo) string
@@ -216,14 +216,13 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 			consumers:  make(map[string]*queueConsumer),
 			spanNameFn: spanNameFn,
 		},
-		keyToType: make(map[string]reflect.Type),
-		typeToKey: make(map[reflect.Type]string),
+		mapper: typemapper.New(),
 	}
 }
 
 func (c *Connection) setup() error {
 	for _, consumer := range (*c).queueConsumers.consumers {
-		if deliveries, err := consumer.consume(c.channel, c.keyToType, c.notificationCh, c.errorCh); err != nil {
+		if deliveries, err := consumer.consume(c.channel, c.notificationCh, c.errorCh); err != nil {
 			return fmt.Errorf("failed to create consumer for queue %s. %v", consumer.queue, err)
 		} else {
 			go consumer.loop(deliveries)
@@ -231,7 +230,3 @@ func (c *Connection) setup() error {
 	}
 	return nil
 }
-
-type routingKeyToType map[string]reflect.Type
-
-type typeToRoutingKey map[reflect.Type]string
