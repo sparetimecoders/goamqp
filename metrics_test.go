@@ -23,30 +23,27 @@
 package goamqp
 
 import (
+	"context"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+func Test_Metrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	require.NoError(t, InitMetrics(registry))
+	channel := NewMockAmqpChannel()
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
-
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+	err := publishMessage(context.Background(), channel, Message{true}, "key", "exchange", nil)
+	require.NoError(t, err)
+	metricFamilies, err := registry.Gather()
+	require.NoError(t, err)
+	var publishedSuccessfully float64
+	for _, metric := range metricFamilies {
+		if *metric.Name == "amqp_events_publish_succeed" {
+			publishedSuccessfully = *metric.GetMetric()[0].GetCounter().Value
+		}
+	}
+	require.Equal(t, 1.0, publishedSuccessfully)
 }

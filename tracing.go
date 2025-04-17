@@ -23,30 +23,32 @@
 package goamqp
 
 import (
-	"testing"
+	"context"
 
-	"github.com/stretchr/testify/require"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+// inject the span context to amqp table
+func injectToHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	for k, v := range carrier {
+		headers[k] = v
+	}
+	return headers
+}
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
+// extract the amqp table to a span context
+func extractToContext(headers amqp.Table) context.Context {
+	carrier := propagation.MapCarrier{}
+	for k, v := range headers {
+		value, ok := v.(string)
+		if ok {
+			carrier[k] = value
+		}
+	}
 
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+	return otel.GetTextMapPropagator().Extract(context.Background(), carrier)
 }
