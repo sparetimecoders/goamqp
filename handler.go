@@ -23,30 +23,28 @@
 package goamqp
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+var ErrParseJSON = errors.New("failed to parse")
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
+// wrappedHandler is internally used to wrap the generic EventHandler
+// this is to facilitate adding all the different type of T on the same map
+type wrappedHandler func(ctx context.Context, event unmarshalEvent) error
 
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+func newWrappedHandler[T any](handler EventHandler[T]) wrappedHandler {
+	return func(ctx context.Context, event unmarshalEvent) error {
+		consumableEvent := ConsumableEvent[T]{
+			Metadata:     event.Metadata,
+			DeliveryInfo: event.DeliveryInfo,
+		}
+		err := json.Unmarshal(event.Payload, &consumableEvent.Payload)
+		if err != nil {
+			return fmt.Errorf("%v: %w", err, ErrParseJSON)
+		}
+		return handler(ctx, consumableEvent)
+	}
 }

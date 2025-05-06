@@ -1,6 +1,9 @@
+//go:build integration
+// +build integration
+
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,25 +28,23 @@ package _integration
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	. "github.com/sparetimecoders/goamqp"
 )
 
 var (
-	amqpUser          = "user"
-	amqpPasswod       = "password"
-	amqpHost          = "localhost"
-	amqpPort          = 5672
-	amqpAdminPort     = 15672
-	amqpURL           = fmt.Sprintf("amqp://%s:%s@%s:%d", amqpUser, amqpPasswod, amqpHost, amqpPort)
 	serverServiceName = "server"
+	amqpURL           = "amqp://user:password@localhost:5672"
 )
 
 type IntegrationTestSuite struct {
@@ -52,14 +53,19 @@ type IntegrationTestSuite struct {
 }
 
 func (suite *IntegrationTestSuite) SetupTest() {
-	suite.admin = AmqpAdmin(amqpHost, amqpAdminPort, amqpUser, amqpPasswod, uuid.New().String())
-	err := suite.admin.CreateVHost()
+	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
+		amqpURL = urlFromEnv
+	}
+	var err error
+	suite.admin, err = FromURL(amqpURL)
 	require.NoError(suite.T(), err)
+	require.NotNil(suite.T(), suite.admin)
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
-	err := suite.admin.DeleteVHost()
+	err := suite.admin.close()
 	require.NoError(suite.T(), err)
+	defer goleak.VerifyNone(suite.T())
 }
 
 func TestIntegration(t *testing.T) {
@@ -68,9 +74,9 @@ func TestIntegration(t *testing.T) {
 
 func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 	conn := createConnection(suite, serverServiceName,
-		ServiceRequestConsumer("key", func(msg any, headers Headers) (response any, err error) {
-			return nil, nil
-		}, Incoming{}),
+		ServiceRequestConsumer("key", func(ctx context.Context, msg ConsumableEvent[any]) error {
+			return nil
+		}),
 	)
 	defer conn.Close()
 
@@ -82,35 +88,36 @@ func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 		Internal:   false,
 		Name:       "server.direct.exchange.request",
 		Type:       "direct",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}, {
 		AutoDelete: false,
 		Durable:    true,
 		Internal:   false,
 		Name:       "server.headers.exchange.response",
 		Type:       "headers",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}}, exchanges)
 
 	queues, err := suite.admin.GetQueues()
 	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), []Queue{{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
 		Name:                 "server.direct.exchange.request.queue",
-		Vhost:                suite.admin.vhost,
+		Vhost:                suite.admin.VHost,
 	}}, queues)
 
 	bindings, err := suite.admin.GetBindings(queues[0].Name, true)
 	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), []Binding{{
 		Source:          "server.direct.exchange.request",
-		Vhost:           suite.admin.vhost,
+		Vhost:           suite.admin.VHost,
 		Destination:     queues[0].Name,
 		DestinationType: "queue",
 		RoutingKey:      "key",
@@ -120,38 +127,39 @@ func (suite *IntegrationTestSuite) Test_ServiceRequestConsumer() {
 
 func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	closer := make(chan bool)
-	var serverReceived *Incoming
+	var serverReceived Incoming
 	routingKey := "key"
 	clientQuery := "test"
 	server := createConnection(suite, serverServiceName,
 		RequestResponseHandler(
 			routingKey,
-			func(msg any, headers Headers) (any, error) {
-				serverReceived = msg.(*Incoming)
+			func(ctx context.Context, msg ConsumableEvent[Incoming]) (IncomingResponse, error) {
+				serverReceived = msg.Payload
 				return IncomingResponse{Value: serverReceived.Query}, nil
-			}, Incoming{}),
+			}),
 		WithTypeMapping(routingKey, Incoming{}),
 	)
 	defer server.Close()
 
 	publish := NewPublisher()
 
-	var clientReceived *IncomingResponse
+	var clientReceived IncomingResponse
 	client := createConnection(suite, "client",
 		ServicePublisher(serverServiceName, publish),
-		ServiceResponseConsumer(serverServiceName, routingKey, func(msg any, headers Headers) (any, error) {
-			clientReceived = msg.(*IncomingResponse)
+		WithTypeMapping(routingKey, Incoming{}),
+		ServiceResponseConsumer(serverServiceName, routingKey, func(ctx context.Context, msg ConsumableEvent[IncomingResponse]) error {
+			clientReceived = msg.Payload
 			closer <- true
-			return nil, nil
-		}, IncomingResponse{}))
+			return nil
+		}))
 	defer client.Close()
 
-	err := publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err := publish.Publish(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
 	<-closer
-	require.Equal(suite.T(), &IncomingResponse{Value: clientQuery}, clientReceived)
-	require.Equal(suite.T(), &Incoming{Query: clientQuery}, serverReceived)
+	require.Equal(suite.T(), IncomingResponse{Value: clientQuery}, clientReceived)
+	require.Equal(suite.T(), Incoming{Query: clientQuery}, serverReceived)
 
 	// Verify exchanges
 	exchanges, err := suite.admin.GetExchanges(true)
@@ -162,14 +170,14 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 		Internal:   false,
 		Name:       "server.direct.exchange.request",
 		Type:       "direct",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}, {
 		AutoDelete: false,
 		Durable:    true,
 		Internal:   false,
 		Name:       "server.headers.exchange.response",
 		Type:       "headers",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}}, exchanges)
 
 	// Verify queues and bindings
@@ -180,14 +188,15 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
 		Name:                 "server.direct.exchange.request.queue",
-		Vhost:                suite.admin.vhost,
+		Vhost:                suite.admin.VHost,
 	}, serverQueue)
 
 	requestBinding, err := suite.admin.GetBindings("server.direct.exchange.request.queue", true)
@@ -195,7 +204,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	require.Equal(suite.T(), []Binding{
 		{
 			Source:          "server.direct.exchange.request",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     "server.direct.exchange.request.queue",
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
@@ -205,14 +214,15 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
 		Name:                 "server.headers.exchange.response.queue.client",
-		Vhost:                suite.admin.vhost,
+		Vhost:                suite.admin.VHost,
 	}, clientQueue)
 
 	responseBinding, err := suite.admin.GetBindings("server.headers.exchange.response.queue.client", true)
@@ -220,7 +230,7 @@ func (suite *IntegrationTestSuite) Test_RequestResponse() {
 	require.Equal(suite.T(), []Binding{
 		{
 			Source:          "server.headers.exchange.response",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     "server.headers.exchange.response.queue.client",
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
@@ -235,36 +245,36 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	clientQuery := "test"
 	publish := NewPublisher()
 	server := createConnection(suite, serverServiceName,
-		EventStreamPublisher(publish))
+		EventStreamPublisher(publish),
+		WithTypeMapping(routingKey, Incoming{}))
 	defer server.Close()
 
-	var client1Received *Incoming
-	var client2Received *Incoming
+	var client1Received Incoming
+	var client2Received Incoming
 	client1 := createConnection(suite, "client1",
-		EventStreamConsumer(routingKey, func(msg any, headers Headers) (response any, err error) {
-			client1Received = msg.(*Incoming)
+		EventStreamConsumer(routingKey, func(ctx context.Context, msg ConsumableEvent[Incoming]) error {
+			client1Received = msg.Payload
 			closer <- true
-			return nil, nil
-		}, Incoming{}),
+			return nil
+		}),
 	)
 	defer client1.Close()
 	client2 := createConnection(suite, "client2",
-		EventStreamConsumer(routingKey, func(msg any, headers Headers) (response any, err error) {
-			client2Received = msg.(*Incoming)
+		EventStreamConsumer(routingKey, func(ctx context.Context, msg ConsumableEvent[Incoming]) error {
+			client2Received = msg.Payload
 			closer <- true
-			return nil, nil
-		}, Incoming{}),
+			return nil
+		}),
 	)
 	defer client2.Close()
 
-	err := publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err := publish.Publish(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
 
-	go forceClose(closer, 3)
 	<-closer
 	<-closer
-	require.Equal(suite.T(), &Incoming{Query: clientQuery}, client1Received)
-	require.Equal(suite.T(), &Incoming{Query: clientQuery}, client2Received)
+	require.Equal(suite.T(), Incoming{Query: clientQuery}, client1Received)
+	require.Equal(suite.T(), Incoming{Query: clientQuery}, client2Received)
 
 	// Verify exchanges
 	exchanges, err := suite.admin.GetExchanges(true)
@@ -275,7 +285,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 		Internal:   false,
 		Name:       "events.topic.exchange",
 		Type:       "topic",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}}, exchanges)
 
 	// Verify queues and bindings
@@ -284,14 +294,15 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
 		Name:                 "events.topic.exchange.queue.client1",
-		Vhost:                suite.admin.vhost,
+		Vhost:                suite.admin.VHost,
 	}, client1Queue)
 
 	client1Binding, err := suite.admin.GetBindings(client1Queue.Name, true)
@@ -299,7 +310,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	require.Equal(suite.T(), []Binding{
 		{
 			Source:          "events.topic.exchange",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     "events.topic.exchange.queue.client1",
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
@@ -312,14 +323,15 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 
 	require.Equal(suite.T(), &Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
 		Name:                 "events.topic.exchange.queue.client2",
-		Vhost:                suite.admin.vhost,
+		Vhost:                suite.admin.VHost,
 	}, client2Queue)
 
 	client2Binding, err := suite.admin.GetBindings(client2Queue.Name, true)
@@ -327,7 +339,7 @@ func (suite *IntegrationTestSuite) Test_EventStream_MultipleConsumers() {
 	require.Equal(suite.T(), []Binding{
 		{
 			Source:          "events.topic.exchange",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     "events.topic.exchange.queue.client2",
 			DestinationType: "queue",
 			RoutingKey:      routingKey,
@@ -349,31 +361,35 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	)
 	defer server.Close()
 
+	mutex := sync.Mutex{}
 	var received []any
 	client1 := createConnection(suite, "client1",
-		TransientEventStreamConsumer(routingKey1, func(msg any, headers Headers) (response any, err error) {
-			received = append(received, msg)
+		TransientEventStreamConsumer(routingKey1, func(ctx context.Context, msg ConsumableEvent[Incoming]) error {
+			mutex.Lock()
+			defer mutex.Unlock()
+			received = append(received, msg.Payload)
 			closer <- true
-			return nil, nil
-		}, Incoming{}),
-		EventStreamConsumer(routingKey2, func(msg any, headers Headers) (response any, err error) {
-			received = append(received, msg)
+			return nil
+		}),
+		EventStreamConsumer(routingKey2, func(ctx context.Context, msg ConsumableEvent[IncomingResponse]) error {
+			mutex.Lock()
+			defer mutex.Unlock()
+			received = append(received, msg.Payload)
 			closer <- true
-			return nil, nil
-		}, IncomingResponse{}),
+			return nil
+		}),
 	)
 	defer client1.Close()
 
-	err := publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err := publish.Publish(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
-	err = publish.PublishWithContext(context.Background(), &IncomingResponse{Value: clientQuery})
+	err = publish.Publish(context.Background(), &IncomingResponse{Value: clientQuery})
 	require.NoError(suite.T(), err)
 
-	go forceClose(closer, 3)
 	<-closer
 	<-closer
-	require.Equal(suite.T(), &Incoming{Query: clientQuery}, received[0])
-	require.Equal(suite.T(), &IncomingResponse{Value: clientQuery}, received[1])
+	require.Equal(suite.T(), Incoming{Query: clientQuery}, received[0])
+	require.Equal(suite.T(), IncomingResponse{Value: clientQuery}, received[1])
 
 	// Verify exchanges
 	exchanges, err := suite.admin.GetExchanges(true)
@@ -384,7 +400,7 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		Internal:   false,
 		Name:       "events.topic.exchange",
 		Type:       "topic",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}}, exchanges)
 
 	// Verify queues and bindings
@@ -397,19 +413,20 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		if q.Name == "events.topic.exchange.queue.client1" {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
-					XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+					XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+					XQueueType: amqp.QueueTypeQuorum,
 				},
 				AutoDelete:           false,
 				Durable:              true,
 				Exclusive:            false,
 				ExclusiveConsumerTag: nil,
 				Name:                 q.Name,
-				Vhost:                suite.admin.vhost,
+				Vhost:                suite.admin.VHost,
 			}, q)
 
 			require.Equal(suite.T(), Binding{
 				Source:          "events.topic.exchange",
-				Vhost:           suite.admin.vhost,
+				Vhost:           suite.admin.VHost,
 				Destination:     q.Name,
 				DestinationType: "queue",
 				RoutingKey:      routingKey2,
@@ -418,19 +435,20 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 		} else {
 			require.Equal(suite.T(), Queue{
 				Arguments: QueueArguments{
-					XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+					XExpires:   1000,
+					XQueueType: amqp.QueueTypeQuorum,
 				},
-				AutoDelete:           true,
-				Durable:              false,
+				AutoDelete:           false,
+				Durable:              true,
 				Exclusive:            false,
 				ExclusiveConsumerTag: nil,
 				Name:                 q.Name,
-				Vhost:                suite.admin.vhost,
+				Vhost:                suite.admin.VHost,
 			}, q)
 
 			require.Equal(suite.T(), Binding{
 				Source:          "events.topic.exchange",
-				Vhost:           suite.admin.vhost,
+				Vhost:           suite.admin.VHost,
 				Destination:     q.Name,
 				DestinationType: "queue",
 				RoutingKey:      routingKey1,
@@ -444,7 +462,8 @@ func (suite *IntegrationTestSuite) Test_EventStream() {
 	require.Equal(suite.T(), 2, len(queuesBeforeClose))
 
 	client1.Close()
-
+	// Give rabbit some time to remove queues with expiration
+	time.Sleep(5 * time.Second)
 	// Transient queues removed
 	queuesAfterClose, err := suite.admin.GetQueues()
 	require.NoError(suite.T(), err)
@@ -471,37 +490,36 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 	var wildcardReceiver []any
 	var exactMatchReceiver []any
 	client1 := createConnection(suite, "client1",
-		EventStreamConsumer(wildcardRoutingKey, func(msg any, headers Headers) (response any, err error) {
-			wildcardReceiver = append(wildcardReceiver, msg)
+		EventStreamConsumer(wildcardRoutingKey, func(ctx context.Context, msg ConsumableEvent[Incoming]) error {
+			wildcardReceiver = append(wildcardReceiver, msg.Payload)
 			closer <- true
-			return nil, nil
-		}, Incoming{}),
-		EventStreamConsumer(wildcardStarRoutingKey, func(msg any, headers Headers) (response any, err error) {
-			wildcardStarReceiver = append(wildcardStarReceiver, msg)
+			return nil
+		}),
+		EventStreamConsumer(wildcardStarRoutingKey, func(ctx context.Context, msg ConsumableEvent[Test]) error {
+			wildcardStarReceiver = append(wildcardStarReceiver, msg.Payload)
 			closer <- true
-			return nil, nil
-		}, Test{}),
-		EventStreamConsumer("testing", func(msg any, headers Headers) (response any, err error) {
-			exactMatchReceiver = append(exactMatchReceiver, msg)
+			return nil
+		}),
+		EventStreamConsumer("testing", func(ctx context.Context, msg ConsumableEvent[IncomingResponse]) error {
+			exactMatchReceiver = append(exactMatchReceiver, msg.Payload)
 			closer <- true
-			return nil, nil
-		}, IncomingResponse{}))
+			return nil
+		}))
 	defer client1.Close()
 
-	err := publish.PublishWithContext(context.Background(), &Test{Test: clientQuery})
+	err := publish.Publish(context.Background(), &Test{Test: clientQuery})
 	require.NoError(suite.T(), err)
-	err = publish.PublishWithContext(context.Background(), &Incoming{Query: clientQuery})
+	err = publish.Publish(context.Background(), &Incoming{Query: clientQuery})
 	require.NoError(suite.T(), err)
-	err = publish.PublishWithContext(context.Background(), &IncomingResponse{Value: clientQuery})
+	err = publish.Publish(context.Background(), &IncomingResponse{Value: clientQuery})
 	require.NoError(suite.T(), err)
 
-	go forceClose(closer, 3)
 	<-closer
 	<-closer
 	<-closer
-	require.Equal(suite.T(), &Incoming{Query: clientQuery}, wildcardReceiver[0])
-	require.Equal(suite.T(), &Test{Test: clientQuery}, wildcardStarReceiver[0])
-	require.Equal(suite.T(), &IncomingResponse{Value: clientQuery}, exactMatchReceiver[0])
+	require.Equal(suite.T(), Incoming{Query: clientQuery}, wildcardReceiver[0])
+	require.Equal(suite.T(), Test{Test: clientQuery}, wildcardStarReceiver[0])
+	require.Equal(suite.T(), IncomingResponse{Value: clientQuery}, exactMatchReceiver[0])
 
 	// Verify exchanges
 	exchanges, err := suite.admin.GetExchanges(true)
@@ -512,30 +530,32 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 		Internal:   false,
 		Name:       "events.topic.exchange",
 		Type:       "topic",
-		Vhost:      suite.admin.vhost,
+		Vhost:      suite.admin.VHost,
 	}}, exchanges)
 
 	// Verify queues and bindings
 	queuesBeforeClose, err := suite.admin.GetQueues()
+	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), 1, len(queuesBeforeClose))
 	q := queuesBeforeClose[0]
 	bindings, err := suite.admin.GetBindings(q.Name, true)
 	require.NoError(suite.T(), err)
 	require.Equal(suite.T(), Queue{
 		Arguments: QueueArguments{
-			XExpires: int(5 * 24 * time.Hour.Milliseconds()),
+			XExpires:   int(5 * 24 * time.Hour.Milliseconds()),
+			XQueueType: amqp.QueueTypeQuorum,
 		},
 		AutoDelete:           false,
 		Durable:              true,
 		Exclusive:            false,
 		ExclusiveConsumerTag: nil,
 		Name:                 "events.topic.exchange.queue.client1",
-		Vhost:                suite.admin.vhost,
+		Vhost:                suite.admin.VHost,
 	}, q)
 	require.ElementsMatch(suite.T(), bindings, []Binding{
 		{
 			Source:          "events.topic.exchange",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     q.Name,
 			DestinationType: "queue",
 			RoutingKey:      wildcardStarRoutingKey,
@@ -543,7 +563,7 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 		},
 		{
 			Source:          "events.topic.exchange",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     q.Name,
 			DestinationType: "queue",
 			RoutingKey:      wildcardRoutingKey,
@@ -551,7 +571,7 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 		},
 		{
 			Source:          "events.topic.exchange",
-			Vhost:           suite.admin.vhost,
+			Vhost:           suite.admin.VHost,
 			Destination:     q.Name,
 			DestinationType: "queue",
 			RoutingKey:      exactMatchRoutingKey,
@@ -571,26 +591,9 @@ func (suite *IntegrationTestSuite) Test_WildcardRoutingKeys() {
 }
 
 func createConnection(suite *IntegrationTestSuite, serviceName string, opts ...Setup) *Connection {
-	conn, err := NewFromURL(serviceName, fmt.Sprintf("%s/%s", amqpURL, suite.admin.vhost))
+	conn, err := NewFromURL(serviceName, fmt.Sprintf("%s/%s", amqpURL, suite.admin.VHost))
 	require.NoError(suite.T(), err)
 	err = conn.Start(context.Background(), opts...)
 	require.NoError(suite.T(), err)
 	return conn
-}
-
-func forceClose(closer chan bool, seconds int64) {
-	time.Sleep(time.Duration(seconds) * time.Second)
-	closer <- true
-}
-
-type Incoming struct {
-	Query string
-}
-
-type Test struct {
-	Test string
-}
-
-type IncomingResponse struct {
-	Value string
 }

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,10 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package goamqp
+//go:build integration
+// +build integration
 
-// errorLogf function called for error logs
-type errorLog func(s string)
+package _integration
 
-// noOpLogger log function that does nothing
-var noOpLogger = func(s string) {}
+type Incoming struct {
+	Query string
+}
+
+type Test struct {
+	Test string
+}
+
+type IncomingResponse struct {
+	Value string
+}

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2024 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,25 +22,13 @@
 
 package goamqp
 
-import (
-	"os"
-	"reflect"
-	"testing"
-
-	"github.com/stretchr/testify/require"
-)
-
-func TestStdoutLogger(t *testing.T) {
-	file, err := os.CreateTemp("", "")
-	require.NoError(t, err)
-	defer func() { _ = os.Remove(file.Name()) }()
-	logger := StdOutMessageLogger()
-	stdout := os.Stdout
-	os.Stdout = file
-	logger([]byte(`{"key":"value"}`), reflect.TypeOf(Connection{}), "key", false)
-	os.Stdout = stdout
-	require.NoError(t, file.Close())
-	all, err := os.ReadFile(file.Name())
-	require.NoError(t, err)
-	require.Equal(t, "Received [goamqp.Connection] from routingkey: 'key' with content:\n{\n\t\"key\": \"value\"\n}\n", string(all))
+// Must is a helper that wraps a call to a function returning (*T, error)
+// and panics if the error is non-nil. It is intended for use in variable
+// initializations such as
+// var c = goamqp.Must(goamqp.NewFromURL("service", "amqp://"))
+func Must[T any](t *T, err error) *T {
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
