@@ -25,6 +25,8 @@ package goamqp
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -39,7 +41,7 @@ func Test_Publisher_Setups(t *testing.T) {
 	tests := []struct {
 		name              string
 		opts              func(p *Publisher) []Setup
-		messages          []any
+		messages          map[string]any
 		expectedError     string
 		expectedExchanges []ExchangeDeclaration
 		expectedQueues    []QueueDeclaration
@@ -50,9 +52,9 @@ func Test_Publisher_Setups(t *testing.T) {
 		{
 			name: "EventStreamConsumer",
 			opts: func(p *Publisher) []Setup {
-				return []Setup{QueuePublisher(p, "destQueue"), WithTypeMapping("key", TestMessage{})}
+				return []Setup{QueuePublisher(p, "destQueue")}
 			},
-			messages: []any{TestMessage{"test", true}},
+			messages: map[string]any{"key": TestMessage{"test", true}},
 			headers:  []Header{{"x-header", "header"}},
 			expectedPublished: []*Publish{{
 				exchange:  "",
@@ -70,9 +72,9 @@ func Test_Publisher_Setups(t *testing.T) {
 		{
 			name: "EventStreamPublisher",
 			opts: func(p *Publisher) []Setup {
-				return []Setup{EventStreamPublisher(p), WithTypeMapping("key", TestMessage{})}
+				return []Setup{EventStreamPublisher(p)}
 			},
-			messages:          []any{TestMessage{"test", true}},
+			messages:          map[string]any{"key": TestMessage{"test", true}},
 			headers:           []Header{{"x-header", "header"}},
 			expectedExchanges: []ExchangeDeclaration{{name: topicExchangeName(defaultEventExchangeName), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeTopic, args: nil}},
 			expectedPublished: []*Publish{{
@@ -91,10 +93,10 @@ func Test_Publisher_Setups(t *testing.T) {
 		{
 			name: "ServicePublisher",
 			opts: func(p *Publisher) []Setup {
-				return []Setup{ServicePublisher("svc", p), WithTypeMapping("key", TestMessage{})}
+				return []Setup{ServicePublisher("svc", p)}
 			},
 			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeDirect, args: nil}},
-			messages:          []any{TestMessage{"test", true}},
+			messages:          map[string]any{"key": TestMessage{"test", true}},
 			expectedPublished: []*Publish{{
 				exchange:  serviceRequestExchangeName("svc"),
 				key:       "key",
@@ -111,13 +113,12 @@ func Test_Publisher_Setups(t *testing.T) {
 		{
 			name: "ServicePublisher - multiple",
 			opts: func(p *Publisher) []Setup {
-				return []Setup{ServicePublisher("svc", p), WithTypeMapping("key1", TestMessage{}), WithTypeMapping("key2", TestMessage2{})}
+				return []Setup{ServicePublisher("svc", p)}
 			},
 			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeDirect, args: nil}},
-			messages: []any{
-				TestMessage{"test", true},
-				TestMessage2{"test", false},
-				TestMessage{"test", false},
+			messages: map[string]any{
+				"key1": TestMessage{"test", true},
+				"key2": TestMessage2{"test", false},
 			},
 			expectedPublished: []*Publish{
 				{
@@ -142,30 +143,8 @@ func Test_Publisher_Setups(t *testing.T) {
 						ContentEncoding: "",
 						DeliveryMode:    2,
 					},
-				}, {
-					exchange:  serviceRequestExchangeName("svc"),
-					key:       "key1",
-					mandatory: false,
-					immediate: false,
-					msg: amqp.Publishing{
-						Headers:         amqp.Table{"service": "svc"},
-						ContentType:     contentType,
-						ContentEncoding: "",
-						DeliveryMode:    2,
-					},
 				},
 			},
-		},
-		{
-			name: "no route",
-			opts: func(p *Publisher) []Setup {
-				return []Setup{ServicePublisher("svc", p)}
-			},
-			expectedExchanges: []ExchangeDeclaration{{name: serviceRequestExchangeName("svc"), noWait: false, internal: false, autoDelete: false, durable: true, kind: amqp.ExchangeDirect, args: nil}},
-			messages: []any{
-				TestMessage{"test", true},
-			},
-			expectedError: "no routingkey configured for message of type goamqp.TestMessage",
 		},
 	}
 	for _, tt := range tests {
@@ -192,8 +171,12 @@ func Test_Publisher_Setups(t *testing.T) {
 				require.Len(t, channel.BindingDeclarations, 0)
 			}
 
-			for i, msg := range tt.messages {
-				err := p.Publish(ctx, msg, tt.headers...)
+			keys := slices.Collect(maps.Keys(tt.messages))
+			slices.Sort(keys)
+			for i := 0; i < len(keys); i++ {
+				key := keys[i]
+				msg := tt.messages[key]
+				err := p.Publish(ctx, key, msg, tt.headers...)
 				if tt.expectedError != "" {
 					require.ErrorContains(t, err, tt.expectedError)
 					continue
@@ -208,12 +191,13 @@ func Test_Publisher_Setups(t *testing.T) {
 				} else if tt.expectedError == "" {
 					require.Fail(t, "nothing published, and no error wanted!")
 				}
+				i++
 			}
 		})
 	}
 }
 
 func Test_InvalidHeader(t *testing.T) {
-	err := (&Publisher{}).setup(nil, "", "", nil, Header{Key: "", Value: ""})
+	err := (&Publisher{}).setup(nil, "", "", Header{Key: "", Value: ""})
 	require.ErrorIs(t, err, ErrEmptyHeaderKey)
 }

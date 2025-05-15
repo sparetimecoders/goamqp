@@ -29,57 +29,38 @@ import (
 	"reflect"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/sparetimecoders/typemapper"
 )
 
 type (
-	// Handler is the type definition for a function that is used to handle "raw" events, without the ConsumableEvent parts.
-	// If processing fails, an error should be returned and the message will be re-queued
-	Handler func(ctx context.Context, event any) error
-	// EventHandler is the type definition for a function that is used to handle events of a specific type.
+	// TypeMapper is a function that maps a routing key to a specific type
+	TypeMapper func(routingKey string) (reflect.Type, bool)
+	// EventHandler is a function that is used to handle events of a specific type.
 	// If processing fails, an error should be returned and the message will be re-queued
 	EventHandler[T any] func(ctx context.Context, event ConsumableEvent[T]) error
-	// RequestResponseEventHandler is the type definition for a function that is used to handle events of a specific
+	// RequestResponseEventHandler is a function that is used to handle events of a specific
 	// type and return a response with RequestResponseHandler.
 	// If processing fails, an error should be returned and the message will be re-queued
 	RequestResponseEventHandler[T any, R any] func(ctx context.Context, event ConsumableEvent[T]) (R, error)
 )
 
-// HandlerFunc is used to process an incoming message
-// If processing fails, an error should be returned and the message will be re-queued
-// The optional response is used automatically when setting up a RequestResponseHandler, otherwise ignored
-// Deprecated: only kept as a convenience for upgrading to new handler functions will be removed in future releases
-type HandlerFunc func(msg any, headers Headers) (response any, err error)
-
-// LegacyHandler provides a way to use old handler functions and type registration
-// Deprecated: only provided as a convenience for upgrading to new handler functions will be removed in future releases
-func LegacyHandler[T any](handler HandlerFunc, typ T) EventHandler[T] {
-	return func(ctx context.Context, event ConsumableEvent[T]) error {
-		_, err := handler(&event.Payload, event.DeliveryInfo.Headers)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-}
-
-// TypeMappingHandler wraps a Handler func into an EventHandler in order to use it with the different
-// Consumer Setup func.
-func TypeMappingHandler(handler Handler, routingKeyToType *typemapper.Mapper) EventHandler[json.RawMessage] {
-	return func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
+// TypeMappingHandler wraps a EventHandler[any] func and uses the TypeMapper to determine how to unwrap the ConsumableEvent
+// payload
+func TypeMappingHandler(handler EventHandler[any], routingKeyToType TypeMapper) EventHandler[any] {
+	return func(ctx context.Context, event ConsumableEvent[any]) error {
 		if routingKeyToType == nil {
 			return fmt.Errorf("mapper is nil")
 		}
-		message, exists := routingKeyToType.Type(event.DeliveryInfo.RoutingKey)
+
+		typ, exists := routingKeyToType(event.DeliveryInfo.RoutingKey)
 		if !exists {
 			return ErrNoMessageTypeForRouteKey
 		}
-		payload := reflect.New(message).Interface()
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		payload := reflect.New(typ.Elem()).Interface()
+		if err := json.Unmarshal(event.Payload.(json.RawMessage), &payload); err != nil {
 			return fmt.Errorf("%v: %w", err, ErrParseJSON)
 		}
-		return handler(ctx, payload)
+		event.Payload = payload
+		return handler(ctx, event)
 	}
 }
 

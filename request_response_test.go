@@ -59,7 +59,7 @@ func Test_RequestResponseHandler(t *testing.T) {
 
 	require.Len(t, (*conn).queueConsumers.consumers, 1)
 	handler, _ := conn.queueConsumers.get("svc.direct.exchange.request.queue", "key")
-	require.Equal(t, "github.com/sparetimecoders/goamqp.Test_RequestResponseHandler.Test_RequestResponseHandler.RequestResponseHandler[...].func6", runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name())
+	require.Equal(t, "github.com/sparetimecoders/goamqp.newWrappedHandler[...].func2", runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name())
 	missing, exists := conn.queueConsumers.get("miggins", "key")
 	require.Nil(t, missing)
 	require.False(t, exists)

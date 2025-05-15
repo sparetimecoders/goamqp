@@ -29,33 +29,11 @@ import (
 	"runtime"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/sparetimecoders/typemapper"
 )
 
 // Setup is a setup function that takes a Connection and use it to set up AMQP
 // An example is to create exchanges and queues
 type Setup func(conn *Connection) error
-
-// WithTypeMappings adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
-func WithTypeMappings(mapper *typemapper.Mapper) Setup {
-	return func(conn *Connection) error {
-		for _, k := range mapper.Keys() {
-			v, _ := mapper.Type(k)
-			if err := conn.mapper.Add(k, v); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-}
-
-// WithTypeMapping adds a two-way mapping between a type and a routing key. The mapping needs to be unique.
-func WithTypeMapping(routingKey string, typ any) Setup {
-	return func(conn *Connection) error {
-		return conn.mapper.Add(routingKey, typ)
-	}
-}
 
 // WithPrefetchLimit configures the number of messages to prefetch from the server.
 // To get round-robin behavior between queueConsumers consuming from the same queue on

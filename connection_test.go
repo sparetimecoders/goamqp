@@ -396,7 +396,7 @@ func TestResponseWrapper(t *testing.T) {
 
 func Test_Publisher_ReservedHeader(t *testing.T) {
 	p := NewPublisher()
-	err := p.Publish(context.Background(), TestMessage{Msg: "test"}, Header{"service", "header"})
+	err := p.Publish(context.Background(), "key", TestMessage{Msg: "test"}, Header{"service", "header"})
 	require.EqualError(t, err, "reserved key service used, please change to use another one")
 }
 

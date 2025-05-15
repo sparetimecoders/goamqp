@@ -26,10 +26,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/sparetimecoders/goamqp"
-	"github.com/sparetimecoders/typemapper"
 )
 
 var amqpURL = "amqp://user:password@localhost:5672"
@@ -41,15 +41,9 @@ func Example_event_stream() {
 	}
 	orderServiceConnection := goamqp.Must(goamqp.NewFromURL("order-service", amqpURL))
 	orderPublisher := goamqp.NewPublisher()
-	mapper, err := typemapper.NewFromMap(map[string]any{
-		"Order.Created": OrderCreated{},
-		"Order.Updated": OrderUpdated{},
-	})
-	checkError(err)
 
-	err = orderServiceConnection.Start(ctx,
+	err := orderServiceConnection.Start(ctx,
 		goamqp.EventStreamPublisher(orderPublisher),
-		goamqp.WithTypeMappings(mapper),
 	)
 	checkError(err)
 
@@ -61,9 +55,9 @@ func Example_event_stream() {
 	err = statService.Start(ctx)
 	checkError(err)
 
-	err = orderPublisher.Publish(context.Background(), OrderCreated{Id: "id"})
+	err = orderPublisher.Publish(context.Background(), "Order.Created", OrderCreated{Id: "id"})
 	checkError(err)
-	err = orderPublisher.Publish(context.Background(), OrderUpdated{Id: "id", Data: "data"})
+	err = orderPublisher.Publish(context.Background(), "Order.Updated", OrderUpdated{Id: "id", Data: "data"})
 	checkError(err)
 	time.Sleep(2 * time.Second)
 	_ = orderServiceConnection.Close()
@@ -116,22 +110,25 @@ func (s *ShippingService) Stop() error {
 
 func (s *ShippingService) Start(ctx context.Context) error {
 	s.connection = goamqp.Must(goamqp.NewFromURL("shipping-service", amqpURL))
-	mapper, _ := typemapper.NewFromMap(map[string]any{
-		"Order.Created": OrderCreated{},
-		"Order.Updated": OrderUpdated{},
-	})
 	return s.connection.Start(ctx,
-		goamqp.EventStreamConsumer("#", goamqp.TypeMappingHandler(func(ctx context.Context, event any) error {
-			switch event.(type) {
+		goamqp.EventStreamConsumer("#", goamqp.TypeMappingHandler(func(ctx context.Context, event goamqp.ConsumableEvent[any]) error {
+			switch event.Payload.(type) {
 			case *OrderCreated:
 				s.output = append(s.output, "Order created")
 			case *OrderUpdated:
 				s.output = append(s.output, "Order deleted")
 			}
 			return nil
-		}, mapper),
-		),
-	)
+		}, func(ctx context.Context, routingKey string) (reflect.Type, bool) {
+			if routingKey == "Order.Created" {
+				return reflect.TypeOf(&OrderCreated{}), true
+			}
+			if routingKey == "Order.Updated" {
+				return reflect.TypeOf(&OrderUpdated{}), true
+			}
+
+			return nil, false
+		})))
 }
 
 func checkError(err error) {

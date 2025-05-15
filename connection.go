@@ -31,8 +31,6 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/sparetimecoders/typemapper"
 )
 
 // Connection is a wrapper around the actual amqp.Connection and amqp.Channel
@@ -43,7 +41,6 @@ type Connection struct {
 	connection     amqpConnection
 	channel        AmqpChannel
 	queueConsumers *queueConsumers
-	mapper         *typemapper.Mapper
 	notificationCh chan<- Notification
 	errorCh        chan<- ErrorNotification
 	spanNameFn     func(DeliveryInfo) string
@@ -216,7 +213,6 @@ func newConnection(serviceName string, uri amqp.URI) *Connection {
 			consumers:  make(map[string]*queueConsumer),
 			spanNameFn: spanNameFn,
 		},
-		mapper: typemapper.New(),
 	}
 }
 

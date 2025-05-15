@@ -28,21 +28,16 @@ import (
 	"fmt"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/sparetimecoders/typemapper"
 )
 
 // Publisher is used to send messages
 type Publisher struct {
-	mapper         *typemapper.Mapper
 	channel        AmqpChannel
 	exchange       string
 	defaultHeaders []Header
 }
 
-// ErrNoRouteForMessageType when the published message cannot be routed.
 var (
-	ErrNoRouteForMessageType    = fmt.Errorf("no routingkey configured for message of type")
 	ErrNoMessageTypeForRouteKey = fmt.Errorf("no message type for routingkey configured")
 )
 
@@ -53,13 +48,12 @@ func NewPublisher() *Publisher {
 
 // PublishWithContext wraps Publish to ease migration to new version of goamqp
 // Deprecated: use Publish directly
-func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...Header) error {
-	return p.Publish(ctx, msg, headers...)
+func (p *Publisher) PublishWithContext(ctx context.Context, routingkKey string, msg any, headers ...Header) error {
+	return p.Publish(ctx, routingkKey, msg, headers...)
 }
 
 // Publish tries to publish msg to AMQP.
-// It requires RoutingKey <-> Type mappings from WithTypeMapping in order to set the correct Routing Key for msg
-func (p *Publisher) Publish(ctx context.Context, msg any, headers ...Header) error {
+func (p *Publisher) Publish(ctx context.Context, routingkKey string, msg any, headers ...Header) error {
 	table := amqp.Table{}
 	for _, v := range p.defaultHeaders {
 		table[v.Key] = v.Value
@@ -71,10 +65,7 @@ func (p *Publisher) Publish(ctx context.Context, msg any, headers ...Header) err
 		table[h.Key] = h.Value
 	}
 
-	if key, ok := p.mapper.Key(msg); ok {
-		return publishMessage(ctx, p.channel, msg, key, p.exchange, table)
-	}
-	return fmt.Errorf("%w %T", ErrNoRouteForMessageType, msg)
+	return publishMessage(ctx, p.channel, msg, routingkKey, p.exchange, table)
 }
 
 // EventStreamPublisher sets up an event stream publisher
@@ -89,7 +80,7 @@ func StreamPublisher(exchange string, publisher *Publisher) Setup {
 		if err := exchangeDeclare(c.channel, exchangeName, amqp.ExchangeTopic); err != nil {
 			return fmt.Errorf("failed to declare exchange %s, %w", exchangeName, err)
 		}
-		return publisher.setup(c.channel, c.serviceName, exchangeName, c.mapper)
+		return publisher.setup(c.channel, c.serviceName, exchangeName)
 	}
 }
 
@@ -98,7 +89,7 @@ func StreamPublisher(exchange string, publisher *Publisher) Setup {
 // https://www.rabbitmq.com/sender-selected.html#:~:text=The%20RabbitMQ%20broker%20treats%20the,key%20if%20they%20are%20present.
 func QueuePublisher(publisher *Publisher, destinationQueueName string) Setup {
 	return func(c *Connection) error {
-		return publisher.setup(c.channel, c.serviceName, "", c.mapper, Header{Key: "CC", Value: []any{destinationQueueName}})
+		return publisher.setup(c.channel, c.serviceName, "", Header{Key: "CC", Value: []any{destinationQueueName}})
 	}
 }
 
@@ -109,11 +100,11 @@ func ServicePublisher(targetService string, publisher *Publisher) Setup {
 		if err := exchangeDeclare(c.channel, exchangeName, amqp.ExchangeDirect); err != nil {
 			return err
 		}
-		return publisher.setup(c.channel, c.serviceName, exchangeName, c.mapper)
+		return publisher.setup(c.channel, c.serviceName, exchangeName)
 	}
 }
 
-func (p *Publisher) setup(channel AmqpChannel, serviceName, exchange string, mapper *typemapper.Mapper, headers ...Header) error {
+func (p *Publisher) setup(channel AmqpChannel, serviceName, exchange string, headers ...Header) error {
 	for _, h := range headers {
 		if err := h.validateKey(); err != nil {
 			return err
@@ -121,7 +112,6 @@ func (p *Publisher) setup(channel AmqpChannel, serviceName, exchange string, map
 	}
 	p.defaultHeaders = append(headers, Header{Key: headerService, Value: serviceName})
 	p.channel = channel
-	p.mapper = mapper
 	p.exchange = exchange
 	return nil
 }

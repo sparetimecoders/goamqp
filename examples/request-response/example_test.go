@@ -49,13 +49,12 @@ func Example_request_response() {
 	publisher := goamqp.NewPublisher()
 
 	err = clientConnection.Start(ctx,
-		goamqp.WithTypeMapping(routingKey, Request{}),
 		goamqp.ServicePublisher("service", publisher),
 		goamqp.ServiceResponseConsumer("service", routingKey, handleResponse),
 	)
 	checkError(err)
 
-	err = publisher.Publish(context.Background(), Request{Data: "test"})
+	err = publisher.Publish(context.Background(), "key", Request{Data: "test"})
 	checkError(err)
 
 	time.Sleep(time.Second)

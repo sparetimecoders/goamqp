@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 )
 
 var ErrParseJSON = errors.New("failed to parse")
@@ -36,11 +37,26 @@ var ErrParseJSON = errors.New("failed to parse")
 type wrappedHandler func(ctx context.Context, event unmarshalEvent) error
 
 func newWrappedHandler[T any](handler EventHandler[T]) wrappedHandler {
+	var t T
+	t1 := reflect.TypeOf(t)
+	if t1 == nil || t1.String() == "json.RawMessage" {
+		// Map to any/json.RawMessage requested, dont unmarshal
+		return func(ctx context.Context, event unmarshalEvent) error {
+			consumableEvent := ConsumableEvent[T]{
+				Metadata:     event.Metadata,
+				DeliveryInfo: event.DeliveryInfo,
+			}
+			consumableEvent.Payload = any(event.Payload).(T)
+			return handler(ctx, consumableEvent)
+		}
+	}
+
 	return func(ctx context.Context, event unmarshalEvent) error {
 		consumableEvent := ConsumableEvent[T]{
 			Metadata:     event.Metadata,
 			DeliveryInfo: event.DeliveryInfo,
 		}
+
 		err := json.Unmarshal(event.Payload, &consumableEvent.Payload)
 		if err != nil {
 			return fmt.Errorf("%v: %w", err, ErrParseJSON)

@@ -33,6 +33,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//func Test_No_Unmarshalling_Payload_Any(t *testing.T) {
+//	type A struct {
+//		A string `json:"a"`
+//	}
+//	err := newWrappedHandler(func(ctx context.Context, event ConsumableEvent[any]) error {
+//		var a A
+//		_ = json.Unmarshal(event.Payload.(json.RawMessage), &a)
+//		require.Equal(t, a.A, "b")
+//		return nil
+//	})(context.TODO(), unmarshalEvent{Payload: []byte(`{"a":"b"}`)})
+//	require.NoError(t, err)
+//}
+//
+//func Test_No_Unmarshalling_Payload_JsonRaw(t *testing.T) {
+//	type A struct {
+//		A string `json:"a"`
+//	}
+//	err := newWrappedHandler(func(ctx context.Context, event ConsumableEvent[json.RawMessage]) error {
+//		var a A
+//		_ = json.Unmarshal(event.Payload, &a)
+//		require.Equal(t, a.A, "b")
+//		return nil
+//	})(context.TODO(), unmarshalEvent{Payload: []byte(`{"a":"b"}`)})
+//	require.NoError(t, err)
+//}
+
 func Test_Invalid_Payload(t *testing.T) {
 	err := newWrappedHandler(func(ctx context.Context, event ConsumableEvent[string]) error {
 		return nil

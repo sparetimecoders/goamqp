@@ -40,12 +40,11 @@ func Example() {
 
 	connection := Must(NewFromURL("service", amqpURL))
 	err := connection.Start(ctx,
-		WithTypeMapping("key", IncomingMessage{}),
 		EventStreamConsumer("key", process),
 		EventStreamPublisher(publisher),
 	)
 	checkError(err)
-	err = publisher.Publish(ctx, IncomingMessage{"OK"})
+	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
 	checkError(err)
 	time.Sleep(time.Second)
 	err = connection.Close()
