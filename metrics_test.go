@@ -24,45 +24,26 @@ package goamqp
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"time"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672"
+func Test_Metrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	require.NoError(t, InitMetrics(registry))
+	channel := NewMockAmqpChannel()
 
-func Example() {
-	ctx := context.Background()
-	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
-		amqpURL = urlFromEnv
+	err := publishMessage(context.Background(), channel, Message{true}, "key", "exchange", nil)
+	require.NoError(t, err)
+	metricFamilies, err := registry.Gather()
+	require.NoError(t, err)
+	var publishedSuccessfully float64
+	for _, metric := range metricFamilies {
+		if *metric.Name == "amqp_events_publish_succeed" {
+			publishedSuccessfully = *metric.GetMetric()[0].GetCounter().Value
+		}
 	}
-	publisher := NewPublisher()
-
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(ctx,
-		EventStreamConsumer("key", process),
-		EventStreamPublisher(publisher),
-	)
-	checkError(err)
-	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
-	checkError(err)
-	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
-}
-
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
-	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil
-}
-
-type IncomingMessage struct {
-	Data string
+	require.Equal(t, 1.0, publishedSuccessfully)
 }

@@ -24,45 +24,31 @@ package goamqp
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"time"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672"
-
-func Example() {
-	ctx := context.Background()
-	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
-		amqpURL = urlFromEnv
+// inject the span context to amqp table
+func injectToHeaders(ctx context.Context, headers amqp.Table) amqp.Table {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	for k, v := range carrier {
+		headers[k] = v
 	}
-	publisher := NewPublisher()
-
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(ctx,
-		EventStreamConsumer("key", process),
-		EventStreamPublisher(publisher),
-	)
-	checkError(err)
-	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
-	checkError(err)
-	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
+	return headers
 }
 
-func checkError(err error) {
-	if err != nil {
-		panic(err)
+// extract the amqp table to a span context
+func extractToContext(headers amqp.Table) context.Context {
+	carrier := propagation.MapCarrier{}
+	for k, v := range headers {
+		value, ok := v.(string)
+		if ok {
+			carrier[k] = value
+		}
 	}
-}
 
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
-	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil
-}
-
-type IncomingMessage struct {
-	Data string
+	return otel.GetTextMapPropagator().Extract(context.Background(), carrier)
 }

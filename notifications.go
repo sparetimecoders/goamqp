@@ -22,47 +22,49 @@
 
 package goamqp
 
-import (
-	"context"
-	"fmt"
-	"os"
-	"time"
+type NotificationSource string
+
+const (
+	NotificationSourceConsumer NotificationSource = "CONSUMER"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672"
-
-func Example() {
-	ctx := context.Background()
-	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
-		amqpURL = urlFromEnv
-	}
-	publisher := NewPublisher()
-
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(ctx,
-		EventStreamConsumer("key", process),
-		EventStreamPublisher(publisher),
-	)
-	checkError(err)
-	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
-	checkError(err)
-	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
+type Notification struct {
+	DeliveryInfo DeliveryInfo
+	Duration     int64
+	Source       NotificationSource
+}
+type ErrorNotification struct {
+	Error        error
+	DeliveryInfo DeliveryInfo
+	Source       NotificationSource
+	Duration     int64
 }
 
-func checkError(err error) {
-	if err != nil {
-		panic(err)
+func notifyEventHandlerSucceed(ch chan<- Notification, info DeliveryInfo, took int64) {
+	if ch != nil {
+		select {
+		case ch <- Notification{
+			DeliveryInfo: info,
+			Source:       NotificationSourceConsumer,
+			Duration:     took,
+		}:
+		default:
+			// Channel full, or not handling messages
+		}
 	}
 }
 
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
-	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil
-}
-
-type IncomingMessage struct {
-	Data string
+func notifyEventHandlerFailed(ch chan<- ErrorNotification, info DeliveryInfo, took int64, err error) {
+	if ch != nil {
+		select {
+		case ch <- ErrorNotification{
+			Error:        err,
+			DeliveryInfo: info,
+			Source:       NotificationSourceConsumer,
+			Duration:     took,
+		}:
+		default:
+			// Channel full, or not handling messages
+		}
+	}
 }

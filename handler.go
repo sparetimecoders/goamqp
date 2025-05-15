@@ -24,45 +24,43 @@ package goamqp
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"time"
+	"reflect"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672"
+var ErrParseJSON = errors.New("failed to parse")
 
-func Example() {
-	ctx := context.Background()
-	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
-		amqpURL = urlFromEnv
+// wrappedHandler is internally used to wrap the generic EventHandler
+// this is to facilitate adding all the different type of T on the same map
+type wrappedHandler func(ctx context.Context, event unmarshalEvent) error
+
+func newWrappedHandler[T any](handler EventHandler[T]) wrappedHandler {
+	var t T
+	t1 := reflect.TypeOf(t)
+	if t1 == nil || t1.String() == "json.RawMessage" {
+		// Map to any/json.RawMessage requested, dont unmarshal
+		return func(ctx context.Context, event unmarshalEvent) error {
+			consumableEvent := ConsumableEvent[T]{
+				Metadata:     event.Metadata,
+				DeliveryInfo: event.DeliveryInfo,
+			}
+			consumableEvent.Payload = any(event.Payload).(T)
+			return handler(ctx, consumableEvent)
+		}
 	}
-	publisher := NewPublisher()
 
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(ctx,
-		EventStreamConsumer("key", process),
-		EventStreamPublisher(publisher),
-	)
-	checkError(err)
-	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
-	checkError(err)
-	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
-}
+	return func(ctx context.Context, event unmarshalEvent) error {
+		consumableEvent := ConsumableEvent[T]{
+			Metadata:     event.Metadata,
+			DeliveryInfo: event.DeliveryInfo,
+		}
 
-func checkError(err error) {
-	if err != nil {
-		panic(err)
+		err := json.Unmarshal(event.Payload, &consumableEvent.Payload)
+		if err != nil {
+			return fmt.Errorf("%v: %w", err, ErrParseJSON)
+		}
+		return handler(ctx, consumableEvent)
 	}
-}
-
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
-	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil
-}
-
-type IncomingMessage struct {
-	Data string
 }

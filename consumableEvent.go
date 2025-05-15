@@ -23,46 +23,38 @@
 package goamqp
 
 import (
-	"context"
-	"fmt"
-	"os"
+	"encoding/json"
 	"time"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672"
-
-func Example() {
-	ctx := context.Background()
-	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
-		amqpURL = urlFromEnv
-	}
-	publisher := NewPublisher()
-
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(ctx,
-		EventStreamConsumer("key", process),
-		EventStreamPublisher(publisher),
-	)
-	checkError(err)
-	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
-	checkError(err)
-	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
+// Metadata holds the metadata of an event.
+type Metadata struct {
+	ID            string    `json:"id"`
+	CorrelationID string    `json:"correlationId"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
+// DeliveryInfo holds information of original queue, exchange and routing keys.
+type DeliveryInfo struct {
+	Queue      string
+	Exchange   string
+	RoutingKey string
+	Headers    Headers
 }
 
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
-	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil
+// ConsumableEvent represents an event that can be consumed.
+// The type parameter T specifies the type of the event's payload.
+type ConsumableEvent[T any] struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      T
 }
 
-type IncomingMessage struct {
-	Data string
+// unmarshalEvent is used internally to unmarshal a PublishableEvent
+// this way the payload ends up being a json.RawMessage instead of map[string]interface{}
+// so that later the json.RawMessage can be unmarshal to ConsumableEvent[T].Payload.
+type unmarshalEvent struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      json.RawMessage
 }

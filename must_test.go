@@ -23,46 +23,19 @@
 package goamqp
 
 import (
-	"context"
-	"fmt"
-	"os"
-	"time"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-var amqpURL = "amqp://user:password@localhost:5672"
+func Test_Must(t *testing.T) {
+	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
+	require.NotNil(t, conn)
 
-func Example() {
-	ctx := context.Background()
-	if urlFromEnv := os.Getenv("AMQP_URL"); urlFromEnv != "" {
-		amqpURL = urlFromEnv
-	}
-	publisher := NewPublisher()
-
-	connection := Must(NewFromURL("service", amqpURL))
-	err := connection.Start(ctx,
-		EventStreamConsumer("key", process),
-		EventStreamPublisher(publisher),
-	)
-	checkError(err)
-	err = publisher.Publish(ctx, "key", IncomingMessage{"OK"})
-	checkError(err)
-	time.Sleep(time.Second)
-	err = connection.Close()
-	checkError(err)
-	// Output: Called process with OK
-}
-
-func checkError(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
-func process(ctx context.Context, m ConsumableEvent[IncomingMessage]) error {
-	fmt.Printf("Called process with %v\n", m.Payload.Data)
-	return nil
-}
-
-type IncomingMessage struct {
-	Data string
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+	_ = Must(NewFromURL("", "invalid"))
 }
