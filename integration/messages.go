@@ -20,33 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package goamqp
+//go:build integration
+// +build integration
 
-import (
-	"testing"
+package _integration
 
-	"github.com/stretchr/testify/require"
-)
+type Incoming struct {
+	Query string
+}
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+type Test struct {
+	Test string
+}
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
-
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+type IncomingResponse struct {
+	Value string
 }

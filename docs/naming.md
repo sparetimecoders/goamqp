@@ -47,4 +47,3 @@ A service that is listening for incoming *responses* will consume messages from 
 ## References
 
 For full reference take a look at the [code](../naming.go) and [tests](../naming_test.go)
-

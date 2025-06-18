@@ -23,50 +23,44 @@
 package goamqp
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 )
 
-// Header represent meta-data  for the message
-// This is backed by an amqp.Table so the same restrictions regarding the type allowed for Value applies
-type Header struct {
-	Key   string
-	Value any
-}
+var ErrParseJSON = errors.New("failed to parse")
 
-var ErrEmptyHeaderKey = errors.New("empty key not allowed")
+// wrappedHandler is internally used to wrap the generic EventHandler
+// this is to facilitate adding all the different type of T on the same map
+type wrappedHandler func(ctx context.Context, event unmarshalEvent) error
 
-// Headers represent all meta-data for the message
-type Headers map[string]any
-
-// Get returns the header value for key, or nil if not present
-func (h Headers) Get(key string) any {
-	if v, ok := h[key]; ok {
-		return v
-	}
-	return nil
-}
-
-func (h Header) validateKey() error {
-	if len(h.Key) == 0 || h.Key == "" {
-		return ErrEmptyHeaderKey
-	}
-	for _, rh := range reservedHeaderKeys {
-		if rh == h.Key {
-			return fmt.Errorf("reserved key %s used, please change to use another one", rh)
+func newWrappedHandler[T any](handler EventHandler[T]) wrappedHandler {
+	var t T
+	t1 := reflect.TypeOf(t)
+	if t1 == nil || t1.String() == "json.RawMessage" {
+		// Map to any/json.RawMessage requested, dont unmarshal
+		return func(ctx context.Context, event unmarshalEvent) error {
+			consumableEvent := ConsumableEvent[T]{
+				Metadata:     event.Metadata,
+				DeliveryInfo: event.DeliveryInfo,
+			}
+			consumableEvent.Payload = any(event.Payload).(T)
+			return handler(ctx, consumableEvent)
 		}
 	}
-	return nil
-}
 
-func (h Headers) validate() error {
-	for k, v := range h {
-		h := Header{k, v}
-		if err := h.validateKey(); err != nil {
-			return err
+	return func(ctx context.Context, event unmarshalEvent) error {
+		consumableEvent := ConsumableEvent[T]{
+			Metadata:     event.Metadata,
+			DeliveryInfo: event.DeliveryInfo,
 		}
-	}
-	return nil
-}
 
-var reservedHeaderKeys = []string{headerService}
+		err := json.Unmarshal(event.Payload, &consumableEvent.Payload)
+		if err != nil {
+			return fmt.Errorf("%v: %w", err, ErrParseJSON)
+		}
+		return handler(ctx, consumableEvent)
+	}
+}

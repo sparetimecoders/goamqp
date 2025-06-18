@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2025 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,40 +20,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package handlers
+package goamqp
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
+	"context"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 )
 
-// overlaps checks if two AMQP binding patterns overlap
-func overlaps(p1, p2 string) bool {
-	if p1 == p2 {
-		return true
-	} else if match(p1, p2) {
-		return true
-	} else if match(p2, p1) {
-		return true
-	}
-	return false
-}
+func Test_Metrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	require.NoError(t, InitMetrics(registry))
+	channel := NewMockAmqpChannel()
 
-// match returns true if the AMQP binding pattern is matching the routing key
-func match(pattern string, routingKey string) bool {
-	b, err := regexp.MatchString(fixRegex(pattern), routingKey)
-	if err != nil {
-		return false
+	err := publishMessage(context.Background(), channel, Message{true}, "key", "exchange", nil)
+	require.NoError(t, err)
+	metricFamilies, err := registry.Gather()
+	require.NoError(t, err)
+	var publishedSuccessfully float64
+	for _, metric := range metricFamilies {
+		if *metric.Name == "amqp_events_publish_succeed" {
+			publishedSuccessfully = *metric.GetMetric()[0].GetCounter().Value
+		}
 	}
-	return b
-}
-
-// fixRegex converts the AMQP binding key syntax to regular expression
-// For example:
-// user.* => user\.[^.]*
-// user.# => user\..*
-func fixRegex(s string) string {
-	replace := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s, ".", "\\."), "*", "[^.]*"), "#", ".*")
-	return fmt.Sprintf("^%s$", replace)
+	require.Equal(t, 1.0, publishedSuccessfully)
 }

@@ -24,3 +24,19 @@ repos:
       - id: go-test-mod
       - id: go-fumpt
       - id: golangci-lint-mod
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.4
+    hooks:
+    - id: insert-license
+      files: \.go$
+      args:
+        - --license-filepath
+        - LICENSE
+        - --comment-style
+        - //
+        - --use-current-year
+  - repo: https://github.com/sparetimecoders/pre-commit-check-signed
+    rev: v0.0.1
+    hooks:
+    - id: check-signed-commit
+      name: check-signed-commit

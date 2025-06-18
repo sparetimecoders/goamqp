@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2025 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,20 @@
 
 package goamqp
 
-// errorLogf function called for error logs
-type errorLog func(s string)
+import (
+	"testing"
 
-// noOpLogger log function that does nothing
-var noOpLogger = func(s string) {}
+	"github.com/stretchr/testify/require"
+)
+
+func Test_Must(t *testing.T) {
+	conn := Must(NewFromURL("", "amqp://user:password@localhost:67333/a"))
+	require.NotNil(t, conn)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+	_ = Must(NewFromURL("", "invalid"))
+}

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 sparetimecoders
+// Copyright (c) 2025 sparetimecoders
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,14 +24,16 @@ package goamqp
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 const defaultEventExchangeName = "events"
 
 func topicExchangeName(svcName string) string {
-	return fmt.Sprintf("%s.%s.exchange", svcName, kindTopic)
+	return fmt.Sprintf("%s.%s.exchange", svcName, amqp091.ExchangeTopic)
 }
 
 func serviceEventQueueName(exchangeName, service string) string {
@@ -60,4 +62,8 @@ func serviceResponseQueueName(targetService, serviceName string) string {
 
 func randomString() string {
 	return uuid.New().String()
+}
+
+func trimExchangeFromQueue(queueName, exchangeName string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(queueName, exchangeName), ".")
 }

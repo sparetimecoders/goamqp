@@ -40,7 +40,7 @@ rabbitmq-server:
 		--env RABBITMQ_DEFAULT_USER=user \
 		--env RABBITMQ_DEFAULT_PASS=password \
 		--env RABBITMQ_DEFAULT_VHOST=test \
-		--pull always rabbitmq:3-management
+		--pull always rabbitmq:4-management
 
 .PHONY: stop-rabbitmq-server
 stop-rabbitmq-server:

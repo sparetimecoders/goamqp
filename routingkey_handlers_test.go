@@ -28,25 +28,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+func Test_RoutingKeyHandlers(t *testing.T) {
+	type mapping struct {
+		key     string
+		handler wrappedHandler
+	}
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
+	tests := []struct {
+		name            string
+		mappings        []mapping
+		expectedMatches []string
+		invalid         bool
+	}{
+		{
+			name: "exists",
+			mappings: []mapping{{
+				key: "key",
+			}},
+			expectedMatches: []string{"key"},
+		},
+		{
+			name: "wildcard in key",
+			mappings: []mapping{{
+				key: "key.a",
+			}},
+			expectedMatches: []string{"key.#"},
+		},
+		{
+			name: "wildcard in mapping",
+			mappings: []mapping{{
+				key: "key.#",
+			}},
+			expectedMatches: []string{"key.a"},
+		},
+		{
+			name: "invalid wildcard",
+			mappings: []mapping{{
+				key: `[`,
+			}},
+			invalid: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rkh := make(routingKeyHandler)
+			for _, m := range tt.mappings {
+				rkh.add(m.key, m.handler)
+			}
+			for _, m := range tt.expectedMatches {
+				matchedRoutingKey, ok := rkh.exists(m)
+				require.Equal(t, ok, !tt.invalid)
+				_, ok = rkh.get(matchedRoutingKey)
+				require.Equal(t, ok, !tt.invalid)
+			}
 
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
-
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+			_, ok := rkh.exists("missing")
+			require.False(t, ok)
+			_, ok = rkh.get("missing")
+			require.False(t, ok)
+		})
+	}
 }

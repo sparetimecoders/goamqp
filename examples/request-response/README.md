@@ -1,28 +1,27 @@
 # Request response
 
-For a request-response set up the server creates a `RequestResponseHandler` with a `HandlerFunc` for a particular type.
+For a request-response set up the server creates a `RequestResponseHandler` with a `EventHandler` for a particular type.
 
 ```go
-func handleRequest(m any, headers Headers) (any, error) {
-    request := m.(*Request)
-    response := Response{Data: request.Data}
+func handleRequest(ctx context.Context, m goamqp.ConsumableEvent[Request]) (any, error) {
+    response := Response{Data: m.Payload.Data}
     return response, nil
 }
-
-RequestResponseHandler('key', handleRequest, Request{})
+RequestResponseHandler(routingKey, handleRequest),
 ```
 
 A client who wants to send a request to the server needs to publish a message with a `ServicePublisher` and handle the
 response with a `ServiceResponseConsumer`.
 
 ```go
-func handleResponse(m any, headers Headers) (any, error) {
-  response := m.(*Response)
-  return nil, nil
+func handleResponse(ctx context.Context, m goamqp.ConsumableEvent[Response]) error {
+    fmt.Printf("Got response, %v", m.Payload.Data)
+    return nil
 }
 
+WithTypeMapping(routingKey, Request{}),
 ServicePublisher("service", publisher),
-ServiceResponseConsumer("service", routingKey, handleResponse, Response{}),
+ServiceResponseConsumer("service", routingKey, handleResponse)
 ```
 
 ## AMQP

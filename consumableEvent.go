@@ -23,30 +23,38 @@
 package goamqp
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
+	"encoding/json"
+	"time"
 )
 
-func Test_Headers(t *testing.T) {
-	h := Headers{}
-	require.NoError(t, h.validate())
+// Metadata holds the metadata of an event.
+type Metadata struct {
+	ID            string    `json:"id"`
+	CorrelationID string    `json:"correlationId"`
+	Timestamp     time.Time `json:"timestamp"`
+}
 
-	h = Headers{"valid": ""}
-	require.NoError(t, h.validate())
-	require.Equal(t, "", h.Get("valid"))
-	require.Nil(t, h.Get("invalid"))
+// DeliveryInfo holds information of original queue, exchange and routing keys.
+type DeliveryInfo struct {
+	Queue      string
+	Exchange   string
+	RoutingKey string
+	Headers    Headers
+}
 
-	h = Headers{"valid1": "1", "valid2": "2"}
-	require.Equal(t, "1", h.Get("valid1"))
-	require.Equal(t, "2", h.Get("valid2"))
+// ConsumableEvent represents an event that can be consumed.
+// The type parameter T specifies the type of the event's payload.
+type ConsumableEvent[T any] struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      T
+}
 
-	h = map[string]any{headerService: "p"}
-	require.EqualError(t, h.validate(), "reserved key service used, please change to use another one")
-
-	h = map[string]any{"": "p"}
-	require.ErrorIs(t, h.validate(), ErrEmptyHeaderKey)
-
-	h = Headers{headerService: "aService"}
-	require.Equal(t, h.Get(headerService), "aService")
+// unmarshalEvent is used internally to unmarshal a PublishableEvent
+// this way the payload ends up being a json.RawMessage instead of map[string]interface{}
+// so that later the json.RawMessage can be unmarshal to ConsumableEvent[T].Payload.
+type unmarshalEvent struct {
+	Metadata
+	DeliveryInfo DeliveryInfo
+	Payload      json.RawMessage
 }
