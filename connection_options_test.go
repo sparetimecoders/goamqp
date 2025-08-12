@@ -318,7 +318,7 @@ func Test_RequestResponseHandler(t *testing.T) {
 
 	invoker, _ := conn.queueHandlers.Handlers("svc.direct.exchange.request.queue").Get("key")
 	require.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
-	require.Equal(t, "github.com/sparetimecoders/goamqp.responseWrapper.func1", runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name())
+	require.Equal(t, "github.com/sparetimecoders/goamqp.Test_RequestResponseHandler.Test_RequestResponseHandler.RequestResponseHandler.func2.responseWrapper.func4", runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name())
 }
 
 func Test_ServicePublisher_Ok(t *testing.T) {
