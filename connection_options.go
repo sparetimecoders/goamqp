@@ -261,6 +261,9 @@ func ServiceRequestConsumer(routingKey string, handler HandlerFunc, eventType an
 // ServicePublisher sets up ap a publisher, that sends messages to the targetService
 func ServicePublisher(targetService string, publisher *Publisher) Setup {
 	return func(c *Connection) error {
+		if publisher.exchange != "" {
+			return ErrServicePublisherAlreadyExist
+		}
 		reqExchangeName := serviceRequestExchangeName(targetService)
 		publisher.connection = c
 		if err := publisher.setDefaultHeaders(c.serviceName); err != nil {
