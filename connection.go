@@ -101,6 +101,8 @@ var (
 	ErrNilLogger = errors.New("cannot use nil as logger func")
 	// ErrRecoverable will not be logged during message processing
 	ErrRecoverable = errors.New("recoverable error")
+	// ErrServicePublisherAlreadyExist is returned when a service publisher is already registered
+	ErrServicePublisherAlreadyExist = errors.New("service publisher already exists")
 )
 
 // NewFromURL creates a new Connection from an URL

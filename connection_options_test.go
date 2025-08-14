@@ -408,6 +408,18 @@ func Test_ServicePublisher_ExchangeDeclareFail(t *testing.T) {
 	require.EqualError(t, err, e.Error())
 }
 
+func Test_ServicePublisher_DuplicateServicePublisher(t *testing.T) {
+	channel := NewMockAmqpChannel()
+	conn := mockConnection(channel)
+
+	p := NewPublisher()
+
+	err := ServicePublisher("svc", p)(conn)
+	require.NoError(t, err)
+	err = ServicePublisher("svc2", p)(conn)
+	require.EqualError(t, err, ErrServicePublisherAlreadyExist.Error())
+}
+
 func Test_TransientEventStreamConsumer_Ok(t *testing.T) {
 	channel := NewMockAmqpChannel()
 	conn := mockConnection(channel)
