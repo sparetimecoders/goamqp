@@ -21,7 +21,7 @@ jobs:
           - 5672:5672
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
           check-latest: true
