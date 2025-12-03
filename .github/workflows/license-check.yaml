@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     name: License and Copyright Check
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: opzkit/go-license-check-action@54ae2868c816a22f8fae9027c38d06c14b37613a # v1.1.0
         with:
           go-version: 'stable'
