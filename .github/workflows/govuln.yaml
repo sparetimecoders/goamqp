@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: opzkit/govulncheck-action@v1
+      - uses: opzkit/govulncheck-action@f522a4de778cf9f398be705615b86addf059f594 # v1.1.1
         with:
           go-version: 'stable'
           check-latest: true
