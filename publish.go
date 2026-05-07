@@ -65,7 +65,7 @@ func (p *Publisher) PublishWithContext(ctx context.Context, msg any, headers ...
 
 	t := reflect.TypeOf(msg)
 	key := t
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		key = t.Elem()
 	}
 	if key, ok := p.connection.typeToKey[key]; ok {
