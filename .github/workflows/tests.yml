@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       rabbitmq:
-        image: rabbitmq@sha256:16df08f231b32987f75793f2c9b7f4de9b7a636acd8ea6b0e192f44140d9f293
+        image: rabbitmq@sha256:63a4b7bf7fb0b620b4e8ea69f6288462af55f80e97f59521f9011e7253ab3817
         env:
           RABBITMQ_DEFAULT_USER: user
           RABBITMQ_DEFAULT_PASS: password
