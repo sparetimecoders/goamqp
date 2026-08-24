@@ -6,4 +6,6 @@ export default {
   rules: {
     'body-max-line-length': [2, 'always', 200],
   },
+  // ponytail: dependabot writes its own body with unwrappable summary/compare URLs
+  ignores: [(message) => message.includes('Signed-off-by: dependabot[bot]')],
 };
