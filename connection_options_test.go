@@ -141,7 +141,8 @@ func Test_UseMessageLogger(t *testing.T) {
 	logger := &MockLogger{}
 	p := NewPublisher()
 
-	_ = conn.Start(context.Background(),
+	_ = conn.Start(
+		context.Background(),
 		UseMessageLogger(logger.logger()),
 		ServicePublisher("service", p),
 	)
@@ -161,7 +162,8 @@ func Test_UseMessageLogger_Nil(t *testing.T) {
 	conn := mockConnection(channel)
 	p := NewPublisher()
 
-	err := conn.Start(context.Background(),
+	err := conn.Start(
+		context.Background(),
 		UseMessageLogger(nil),
 		ServicePublisher("service", p),
 	)
@@ -173,7 +175,8 @@ func Test_UseMessageLogger_Default(t *testing.T) {
 	conn := mockConnection(channel)
 	p := NewPublisher()
 
-	err := conn.Start(context.Background(),
+	err := conn.Start(
+		context.Background(),
 		ServicePublisher("service", p),
 	)
 	require.NoError(t, err)
@@ -318,7 +321,8 @@ func Test_RequestResponseHandler(t *testing.T) {
 
 	invoker, _ := conn.queueHandlers.Handlers("svc.direct.exchange.request.queue").Get("key")
 	require.Equal(t, reflect.TypeOf(Message{}), invoker.eventType)
-	require.Equal(t, "github.com/sparetimecoders/goamqp.Test_RequestResponseHandler.Test_RequestResponseHandler.RequestResponseHandler.func2.responseWrapper.func4", runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name())
+	// ponytail: exact closure name varies by Go compiler version, match the enclosing func only
+	require.Contains(t, runtime.FuncForPC(reflect.ValueOf(invoker.msgHandler).Pointer()).Name(), "goamqp.responseWrapper")
 }
 
 func Test_ServicePublisher_Ok(t *testing.T) {
