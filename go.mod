@@ -2,7 +2,7 @@ module github.com/sparetimecoders/goamqp
 
 go 1.22.12
 
-toolchain go1.26.4
+toolchain go1.27.1
 
 require (
 	github.com/google/uuid v1.6.0
