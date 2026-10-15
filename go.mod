@@ -1,3 +1,4 @@
+// Deprecated: moved to codeberg.org/messaging/go-messaging-amqp
 module github.com/sparetimecoders/goamqp
 
 go 1.22.12
